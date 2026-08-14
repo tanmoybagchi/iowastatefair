@@ -32,6 +32,13 @@
   --bldg: #bcc6d3;
   --bldg-line: #7d8a9c;
 
+  /*
+   * Tells the browser both palettes are supported, so UA-drawn furniture — scrollbars, focus
+   * rings, form controls — follows the active one. Without it the sheet's scrollbar rendered as a
+   * light track over the dark panel.
+   */
+  color-scheme: light dark;
+
   --r: 12px;
   --r-lg: 18px;
   --tap: 44px;
@@ -332,6 +339,13 @@ a { color: var(--accent); }
   background: transparent;
   cursor: pointer;
   min-height: var(--tap);
+  /*
+   * Explicit, because this is a <button> and buttons do not inherit color — without it the name
+   * renders in the UA's `buttontext` while .sub below picks up --ink-soft, so in dark mode the
+   * subtitle came out brighter than the title it belongs to. Invisible in light mode, where
+   * buttontext happens to be near enough to --ink.
+   */
+  color: var(--ink);
 }
 .result:active { background: var(--paper-2); }
 .result .main { flex: 1; min-width: 0; }
@@ -553,4 +567,7 @@ dl.kv dd { margin: 2px 0 0; color: var(--ink-soft); }
   .badge.new { background: #40320f; color: #f0d9a8; border-color: #5d4a1a; }
   .badge.diet { background: #163a27; color: #b6e2c8; border-color: #245c3c; }
   .badge.beer { background: #2e2340; color: #d6c4f0; border-color: #46345f; }
+  /* Was the one badge left out of this block: a hardcoded near-white tile carrying --ink-faint,
+     which in dark resolves to light grey on light grey. It appears on every approximate pin. */
+  .badge.approx { background: #2b323d; color: #c3ccd8; border-color: var(--line); }
 }
