@@ -1,5 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Iowa State Fair finder">
-  <!-- Maskable-safe: all meaningful content sits inside the central 80% safe zone. -->
+  <!--
+    NOT maskable-safe as drawn: the corn dog's stick reaches ~216px from centre, against the
+    204.8px safe radius a maskable icon gets, so a circular mask clips its end. tools/make-icons.js
+    handles that by rendering separate maskable PNGs with this artwork inset 10% on a red field —
+    so keep the background rect full-bleed, and re-run that tool after editing.
+  -->
   <rect width="512" height="512" fill="#b7202e"/>
   <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
     <!-- Map pin -->

@@ -26,19 +26,7 @@ const path = require('path');
 const BASE = process.argv[2] || 'http://localhost:8099/';
 const FAIR_LAT = 41.5952, FAIR_LON = -93.5510;   // Agriculture Building / Butter Cow
 
-const CHROME_CANDIDATES = [
-  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files/Google/Chrome/Application/chrome.exe',
-  process.env.LOCALAPPDATA + '/Google/Chrome/Application/chrome.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-];
-
-function findChrome() {
-  for (const c of CHROME_CANDIDATES) { try { if (c && fs.existsSync(c)) return c; } catch {} }
-  return null;
-}
+const { findChrome } = require('./chrome.js');
 
 const getJson = url => new Promise((resolve, reject) => {
   (url.startsWith('https') ? https : http).get(url, res => {
@@ -156,6 +144,13 @@ async function run() {
     { encoding: 'utf8' });
   check('build: service-worker cache stamp matches the assets on disk', stamped.status === 0,
     `${stamped.stdout || ''}${stamped.stderr || ''}`.trim().split('\n')[0]);
+
+  // Same idea for the icons: they are generated, so they can silently fall out of step with
+  // icon.svg. A wrong-sized apple-touch-icon is invisible until someone installs the app.
+  const icons = spawnSync(process.execPath, [path.join(__dirname, 'make-icons.js'), '--check'],
+    { encoding: 'utf8' });
+  check('build: generated icons present and correctly sized', icons.status === 0,
+    `${icons.stdout || ''}${icons.stderr || ''}`.trim().split('\n')[0]);
 
   const chrome = findChrome();
   if (!chrome) { console.error('No Chrome/Edge found; cannot smoke test.'); process.exit(2); }
@@ -301,6 +296,31 @@ async function run() {
       water.length >= 2 && dists[0] <= dists[1],
       water.map(w => `${w.name} ${w.dist}`).join(' | '));
 
+    // Flow 3b — the close button actually closes, and stays closed across a GPS tick.
+    //
+    // Regression: renderList() used to end in openSheet(), and the geolocation subscriber calls
+    // renderList() on every fix, so dismissing the panel lasted only until the next tick. Moving
+    // the geolocation override is the whole point of this check — asserting "closed" immediately
+    // after the click passed even with the bug present.
+    const closed = await evaluate(`(() => {
+      document.getElementById('sheet-close').click();
+      return document.getElementById('sheet').classList.contains('open'); })()`);
+    check('flow: close button closes the list', closed === false);
+
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: FAIR_LAT + 0.0004, longitude: FAIR_LON + 0.0004, accuracy: 12 });
+    await sleep(1400);
+    const afterTick = await evaluate(`({
+      open: document.getElementById('sheet').classList.contains('open'),
+      pins: document.querySelectorAll('#map .pin').length })`);
+    check('flow: list stays closed after a location update', afterTick.open === false);
+    // Closing the panel is how you look at the map, so the pins it put there must survive.
+    check('flow: closing the list keeps its map pins', afterTick.pins > 0, `${afterTick.pins} pins`);
+
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 12 });
+    await sleep(600);
+
     // Flow 4 — open directions
     await evaluate(`document.querySelector('#sheet-body .result').click()`);
     await sleep(400);
@@ -430,9 +450,10 @@ async function run() {
     }
 
     // ---------------------------------------------------------------- console health
-    const realErrors = errors.filter(e => !/favicon/i.test(e));
-    check('no console errors or exceptions', realErrors.length === 0,
-      realErrors.slice(0, 4).join(' || ') || 'clean');
+    // Favicon 404s used to be filtered out here. They aren't any more: the pages now declare a
+    // real icon, so a favicon error means that wiring is broken and should fail the run.
+    check('no console errors or exceptions', errors.length === 0,
+      errors.slice(0, 4).join(' || ') || 'clean');
 
     ws.close();
   } finally {

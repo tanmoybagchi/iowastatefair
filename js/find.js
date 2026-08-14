@@ -292,7 +292,18 @@
     const sBtn = sheetBody.querySelector('[data-suggest]');
     if (sBtn) sBtn.addEventListener('click', () => { qEl.value = sBtn.dataset.suggest; runSearch(); });
 
-    openSheet();
+    /*
+     * Deliberately does NOT open the sheet.
+     *
+     * This runs on every geolocation tick to keep distances honest as you walk, and watchPosition
+     * fires constantly. If rendering also forced the panel open, dismissing it would last until
+     * the next GPS fix — which looked exactly like the close button being broken. Callers that
+     * mean "show me this list" call openSheet() themselves; refreshing content is a separate act
+     * from presenting it.
+     *
+     * Pins are still updated while the panel is closed, on purpose: closing it is how you get a
+     * look at the pins on the map.
+     */
     updatePins(places);
   }
 
@@ -368,7 +379,9 @@
     </div>`;
 
     const back = document.getElementById('back');
-    if (back) back.addEventListener('click', () => { state.selected = null; window.FairMap.setTarget(null); renderList(); });
+    if (back) back.addEventListener('click', () => {
+      state.selected = null; window.FairMap.setTarget(null); renderList(); openSheet();
+    });
     const comp = document.getElementById('compass');
     if (comp) comp.addEventListener('click', async () => {
       const ok = await Geo.requestHeading();
@@ -416,6 +429,7 @@
     state.selected = null;
     window.FairMap.setTarget(null);
     renderList();
+    openSheet();
   }
 
   function runChip(name) {
@@ -436,6 +450,7 @@
     window.FairMap.setTarget(null);
     state.results = chip.build();
     renderList();
+    openSheet();
   }
 
   const openSheet = () => sheet.classList.add('open');
@@ -497,7 +512,7 @@
         state.results = F.items.filter(i => (i.d || []).length).map(i => toPlace({ type: 'item', item: i }));
         sheetTitle.textContent = 'Dietary';
       }
-      if (state.mode !== 'idle') renderList();
+      if (state.mode !== 'idle') { renderList(); openSheet(); }
     }));
 
   $('zin').addEventListener('click', () => window.FairMap.zoomIn());

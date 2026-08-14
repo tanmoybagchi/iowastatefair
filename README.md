@@ -138,6 +138,8 @@ actually reaches phones that already have the app installed.
 | `tools/serve.js` | static dev server, with optional subpath |
 | `tools/smoke.js` | headless-Chrome checks over the DevTools protocol |
 | `tools/stamp-sw.js` | rewrites the `sw.js` cache name from a hash of the precached assets |
+| `tools/make-icons.js` | rasterises `icon.svg` into the install icons, using Chrome as the renderer |
+| `tools/chrome.js` | finds a local Chrome or Edge; shared by the two tools above |
 
 Next year, the reports keep the same shape: drop the new PDFs into `_source/`, update the grid
 refs and rankings in `source-manual.js`, and rebuild.
@@ -150,13 +152,14 @@ node tools/smoke.js http://localhost:8099/
 node tools/smoke.js http://localhost:8099/ --update-cycle   # + the update path (see below)
 ```
 
-23 checks: the service-worker stamp matches the assets on disk, pages boot, the map draws,
-geolocation is accepted, the four core flows work ("curly fries", the typo case, nearest-water,
-directions), the other two pages render, the service worker activates, **the app boots, searches
-and reports its version with the network switched off**, being away from the fairgrounds
-suppresses distances instead of printing nonsense, and the console is clean.
+27 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
+map draws, geolocation is accepted, the four core flows work ("curly fries", the typo case,
+nearest-water, directions), **closing the result list stays closed across a location update**, the
+other two pages render, the service worker activates, **the app boots, searches and reports its
+version with the network switched off**, being away from the fairgrounds suppresses distances
+instead of printing nonsense, and the console is clean.
 
-`--update-cycle` adds a 24th check, and it is the only one that exercises an *already installed*
+`--update-cycle` adds a 28th check, and it is the only one that exercises an *already installed*
 worker being replaced by a new build — everything else does a first install, where `shell.js`
 deliberately does not reload. It appends a comment to `css/app.css`, re-stamps, forces an update
 check, and asserts the page comes back reporting the new cache name. It restores the original
