@@ -152,14 +152,14 @@ node tools/smoke.js http://localhost:8099/
 node tools/smoke.js http://localhost:8099/ --update-cycle   # + the update path (see below)
 ```
 
-27 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
+30 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
 map draws, geolocation is accepted, the four core flows work ("curly fries", the typo case,
 nearest-water, directions), **closing the result list stays closed across a location update**, the
 other two pages render, the service worker activates, **the app boots, searches and reports its
 version with the network switched off**, being away from the fairgrounds suppresses distances
 instead of printing nonsense, and the console is clean.
 
-`--update-cycle` adds a 28th check, and it is the only one that exercises an *already installed*
+`--update-cycle` adds a 31st check, and it is the only one that exercises an *already installed*
 worker being replaced by a new build — everything else does a first install, where `shell.js`
 deliberately does not reload. It appends a comment to `css/app.css`, re-stamps, forces an update
 check, and asserts the page comes back reporting the new cache name. It restores the original
@@ -209,6 +209,24 @@ worker itself, so it's the truth even if the page came from a stale cache — an
 unregisters every worker, deletes every cache and reloads. It refuses when `navigator.onLine` is
 false: discarding the offline copy with no signal would leave the app with nothing to fall back
 on, which is the exact situation it exists for.
+
+## Screen and battery
+
+The fair runs 8am to midnight. A phone that dies at 4pm has no map and no way of finding the car,
+so both of the expensive APIs here are scoped rather than left running.
+
+**The screen is held awake only while directions are open.** `js/wake.js` takes a Screen Wake Lock
+when you pick a result and drops it on *Back to list* or on closing the sheet. The tempting
+alternative — acquire on interaction, release after an idle timeout — is backwards for this app:
+walking across the fairgrounds watching the distance count down means looking at the screen and
+touching nothing, so an idle timer would release the lock exactly when it's wanted and hold it
+while you read a menu sitting down. Unsupported browsers (anything before iOS 16.4) simply no-op.
+
+**The GPS watch stops when the app isn't on screen.** `watchPosition` runs with
+`enableHighAccuracy`, which keeps the radio busy, so `js/geo.js` drops the watch on
+`visibilitychange` and re-arms it on return. The last known position is kept rather than cleared,
+so coming back to the app shows the distances you last saw while a fresh fix arrives instead of
+blanking them — those can be a few minutes stale for a moment, which beats showing nothing.
 
 ## Hosting
 

@@ -14,7 +14,7 @@
  * browser re-run install.
  */
 
-const CACHE = 'isf-2026-e69a2dea';
+const CACHE = 'isf-2026-b63de747';
 
 // Relative URLs so the same worker functions under a subpath (Caddy /fair/, GitHub Pages).
 const ASSETS = [
@@ -30,6 +30,7 @@ const ASSETS = [
   './js/find.js',
   './js/foods.js',
   './js/info.js',
+  './js/wake.js',
   './js/shell.js',
   './manifest.webmanifest',
   // Icons are precached too, so an install that happens offline still has a real tile rather than

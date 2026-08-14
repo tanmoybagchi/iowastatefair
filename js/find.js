@@ -326,6 +326,9 @@
       if (g.usable) window.FairMap.frame(g, place);
       else window.FairMap.focus(place, 900);
     }
+    // You're about to walk somewhere while watching the distance — don't let the screen sleep.
+    // Released again by closeSheet() and by "Back to list".
+    if (window.Wake) window.Wake.hold();
     renderDirections();
   }
 
@@ -380,7 +383,11 @@
 
     const back = document.getElementById('back');
     if (back) back.addEventListener('click', () => {
-      state.selected = null; window.FairMap.setTarget(null); renderList(); openSheet();
+      state.selected = null;
+      window.FairMap.setTarget(null);
+      if (window.Wake) window.Wake.release();   // browsing a list again, not walking a route
+      renderList();
+      openSheet();
     });
     const comp = document.getElementById('compass');
     if (comp) comp.addEventListener('click', async () => {
@@ -454,7 +461,12 @@
   }
 
   const openSheet = () => sheet.classList.add('open');
-  const closeSheet = () => { sheet.classList.remove('open'); state.selected = null; window.FairMap.setTarget(null); };
+  const closeSheet = () => {
+    sheet.classList.remove('open');
+    state.selected = null;
+    window.FairMap.setTarget(null);
+    if (window.Wake) window.Wake.release();
+  };
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

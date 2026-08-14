@@ -91,8 +91,10 @@
   // ---------------------------------------------------------------- watching
 
   let watchId = null;
+  let wanted = false;      // the app has asked to be located; survives a background/resume cycle
 
   function start() {
+    wanted = true;
     if (!('geolocation' in navigator)) {
       state.status = 'unavailable';
       state.error = 'This browser has no location support.';
@@ -109,8 +111,13 @@
     }
     if (watchId != null) return;
 
-    state.status = 'locating';
-    emit();
+    // Only announce "locating" when there is nothing better to show. On a resume from background
+    // we already have a fix, and flipping to 'locating' would blank every distance in the list for
+    // a second or two on each return to the app.
+    if (state.lat == null) {
+      state.status = 'locating';
+      emit();
+    }
 
     watchId = navigator.geolocation.watchPosition(
       (pos) => {
@@ -146,9 +153,33 @@
     );
   }
 
-  function stop() {
+  /** Drop the watch but stay willing to resume — used when the app goes off screen. */
+  function pause() {
     if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
   }
+
+  /** Stop for good. Distinct from pause() so a later visibility change can't quietly restart it. */
+  function stop() {
+    wanted = false;
+    pause();
+  }
+
+  /*
+   * Drop the GPS watch while the app isn't on screen.
+   *
+   * watchPosition runs with enableHighAccuracy, which keeps the GPS radio busy. Left running in the
+   * background it would drain the battery all day for readings nobody is looking at — and this app
+   * is for an eleven-hour day at a fairground where a dead phone means no map and no way home.
+   *
+   * The last known position is deliberately kept rather than cleared, so returning to the app
+   * shows the distances you last saw while a fresh fix arrives, instead of blanking them. Those
+   * numbers can be a few minutes stale for a moment; a stale distance beats no distance, and the
+   * first callback corrects it.
+   */
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') pause();
+    else if (wanted) start();
+  });
 
   // ---------------------------------------------------------------- heading
 

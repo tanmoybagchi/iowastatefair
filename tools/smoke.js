@@ -321,6 +321,29 @@ async function run() {
       { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 12 });
     await sleep(600);
 
+    // Flow 3c — the screen wake lock follows the directions panel, not activity.
+    //
+    // Asserts Wake.wanted, the intent, rather than Wake.held: headless Chrome has no screen to
+    // keep awake and may refuse the request outright, which would make a check on the real lock
+    // fail for reasons that say nothing about this app.
+    // A search rather than the water chip: closing the sheet above deliberately leaves the chip
+    // active, so clicking it again would toggle it off and empty the list.
+    await evaluate(`(() => { const q = document.getElementById('q');
+      q.value = 'corn dog'; q.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await sleep(500);
+    const wakeIdle = await evaluate(`!!(window.Wake && window.Wake.wanted)`);
+    check('wake: screen not held while only browsing a list', wakeIdle === false);
+
+    await evaluate(`document.querySelector('#sheet-body .result').click()`);
+    await sleep(300);
+    check('wake: screen held once directions are open',
+      (await evaluate(`!!(window.Wake && window.Wake.wanted)`)) === true);
+
+    await evaluate(`document.getElementById('back').click()`);
+    await sleep(300);
+    check('wake: screen released on going back to the list',
+      (await evaluate(`!!(window.Wake && window.Wake.wanted)`)) === false);
+
     // Flow 4 — open directions
     await evaluate(`document.querySelector('#sheet-body .result').click()`);
     await sleep(400);
