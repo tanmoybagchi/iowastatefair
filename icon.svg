@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Iowa State Fair finder">
+  <!-- Maskable-safe: all meaningful content sits inside the central 80% safe zone. -->
+  <rect width="512" height="512" fill="#b7202e"/>
+  <g fill="none" stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Map pin -->
+    <path d="M256 132c-46 0-83 37-83 83 0 58 83 145 83 145s83-87 83-145c0-46-37-83-83-83z"/>
+    <circle cx="256" cy="215" r="30"/>
+  </g>
+  <!-- Corn dog on a stick, because it is the Iowa State Fair -->
+  <g transform="rotate(28 256 400)">
+    <rect x="246" y="392" width="20" height="86" rx="10" fill="#f2d3a0"/>
+    <rect x="222" y="316" width="68" height="98" rx="34" fill="#e08b2a" stroke="#ffffff" stroke-width="12"/>
+  </g>
+</svg>

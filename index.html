@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#b7202e">
+<meta name="description" content="Find food, water and anything else at the 2026 Iowa State Fair, sorted by how far it is from where you're standing. Works offline.">
+<title>Find it — Iowa State Fair 2026</title>
+<!-- All paths are relative so this works from file://, a Caddy subpath, or GitHub Pages. -->
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <span class="wordmark">Iowa State Fair</span>
+    <span class="dates">Aug 13–23, 2026<br>Fair Spirit</span>
+  </header>
+
+  <main class="find" id="find">
+    <svg id="map" aria-describedby="map-desc"></svg>
+    <p id="map-desc" class="sr-only">
+      Schematic map of the Iowa State Fairgrounds. Search or use the category buttons to list
+      places sorted by distance from you; each result opens walking directions.
+    </p>
+
+    <div class="searchwrap">
+      <div class="searchbar">
+        <span aria-hidden="true">🔍</span>
+        <label class="sr-only" for="q">Search food, drinks, stands and places</label>
+        <input id="q" type="search" inputmode="search" autocomplete="off"
+               enterkeyhint="search" placeholder="curly fries, water, corn dog…">
+        <button class="clear" id="clear" type="button" aria-label="Clear search" hidden>✕</button>
+      </div>
+      <div class="chips" role="group" aria-label="Quick categories">
+        <button class="chip" type="button" data-chip="new">✨ New foods</button>
+        <button class="chip" type="button" data-chip="water">💧 Water</button>
+        <button class="chip" type="button" data-chip="stick">🍢 On a stick</button>
+        <button class="chip" type="button" data-chip="firstaid">➕ First aid</button>
+        <button class="chip" type="button" data-chip="beer">🍺 Beer</button>
+        <button class="chip" type="button" data-chip="gates">🚪 Gates</button>
+        <button class="chip diet" type="button" data-diet="V">Vegan</button>
+        <button class="chip diet" type="button" data-diet="VG">Vegetarian</button>
+        <button class="chip diet" type="button" data-diet="GF">Gluten-friendly</button>
+        <button class="chip diet" type="button" data-diet="DF">Dairy-free</button>
+      </div>
+    </div>
+
+    <div class="map-controls">
+      <button class="map-btn" id="locate" type="button" aria-label="Centre on my location">◎</button>
+      <button class="map-btn" id="zin" type="button" aria-label="Zoom in">+</button>
+      <button class="map-btn" id="zout" type="button" aria-label="Zoom out">−</button>
+      <button class="map-btn" id="zreset" type="button" aria-label="Show whole fairgrounds">⤢</button>
+    </div>
+
+    <div class="status" id="status" hidden role="status"></div>
+
+    <section class="sheet" id="sheet" aria-live="polite">
+      <div class="sheet-grip">
+        <span class="sheet-title" id="sheet-title">Results</span>
+        <span class="bar" aria-hidden="true"></span>
+        <button class="sheet-close" id="sheet-close" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body" id="sheet-body"></div>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="Main">
+    <a href="./index.html" aria-current="page"><span class="ico" aria-hidden="true">🧭</span>Find</a>
+    <a href="./foods.html"><span class="ico" aria-hidden="true">✨</span>New foods</a>
+    <a href="./info.html"><span class="ico" aria-hidden="true">ℹ️</span>Info</a>
+  </nav>
+</div>
+
+<script src="./js/data.js"></script>
+<script src="./js/geo.js"></script>
+<script src="./js/fuzzy.js"></script>
+<script src="./js/fairmap.js"></script>
+<script src="./js/find.js"></script>
+<script src="./js/shell.js"></script>
+</body>
+</html>

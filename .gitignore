@@ -1,0 +1,25 @@
+# Screenshots from `node tools/smoke.js --shots _shots` — verification artefacts, not source.
+_shots/
+
+# Machine-local Claude Code settings — absolute paths and a session id, personal to one checkout.
+.claude/settings.local.json
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# There are no dependencies, so there is nothing to install and nothing to ignore here.
+node_modules/
+
+# The fair's own PDFs are not redistributed here — they are the Iowa State Fair's documents, not
+# ours, and this repo is public. Keep your local copies; see README → Where the data comes from
+# for the filenames and where to download them. The OpenStreetMap extracts go too, since the
+# build needs the PDFs anyway and tools/fetch-osm.sh can re-download them.
+_source/
+
+# NOTE: js/data.js is intentionally COMMITTED. It is generated, but committing it is what makes
+# the site deployable as-is — GitHub Pages serves static files and won't run the build step. It
+# is also the reason the app still works for everyone without _source/ in the repo.

@@ -1,0 +1,448 @@
+'use strict';
+/*
+ * smoke.js — drive the app in headless Chrome over the DevTools protocol and report what
+ * actually happened: console errors, page exceptions, failed requests, and a few DOM assertions.
+ *
+ *   node tools/serve.js 8099 &
+ *   node tools/smoke.js http://localhost:8099/
+ *
+ * Uses only Node's built-ins and Chrome's own remote-debugging websocket, so there is nothing
+ * to install. It is intentionally small: enough to prove the pages boot, the map draws, search
+ * returns the right answers and geolocation is wired up — not a full test framework.
+ *
+ * Geolocation is overridden to a point on the fairgrounds (the Agriculture Building), because
+ * that is the only way to exercise distance sorting without standing in Des Moines.
+ */
+
+const http = require('http');
+const https = require('https');
+const crypto = require('crypto');
+const net = require('net');
+const { spawn, spawnSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+const BASE = process.argv[2] || 'http://localhost:8099/';
+const FAIR_LAT = 41.5952, FAIR_LON = -93.5510;   // Agriculture Building / Butter Cow
+
+const CHROME_CANDIDATES = [
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  process.env.LOCALAPPDATA + '/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium',
+];
+
+function findChrome() {
+  for (const c of CHROME_CANDIDATES) { try { if (c && fs.existsSync(c)) return c; } catch {} }
+  return null;
+}
+
+const getJson = url => new Promise((resolve, reject) => {
+  (url.startsWith('https') ? https : http).get(url, res => {
+    let d = '';
+    res.on('data', c => (d += c));
+    res.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+  }).on('error', reject);
+});
+
+const waitPort = (port, ms) => new Promise((resolve, reject) => {
+  const t0 = Date.now();
+  const tick = () => {
+    const s = net.connect(port, '127.0.0.1');
+    s.on('connect', () => { s.destroy(); resolve(); });
+    s.on('error', () => {
+      s.destroy();
+      if (Date.now() - t0 > ms) reject(new Error('chrome did not open a debug port'));
+      else setTimeout(tick, 120);
+    });
+  };
+  tick();
+});
+
+/* ------------------------------------------------------------------ minimal websocket client */
+
+/*
+ * A tiny RFC6455 client. Only what CDP needs: a masked text frame out, unfragmented text
+ * frames in. Avoids adding a dependency to a project that deliberately has none.
+ */
+class WS {
+  constructor(url) {
+    this.url = url;
+    this.seq = 0;
+    this.pending = new Map();
+    this.handlers = [];
+    this.buf = Buffer.alloc(0);
+  }
+  connect() {
+    return new Promise((resolve, reject) => {
+      const u = new URL(this.url);
+      const key = crypto.randomBytes(16).toString('base64');
+      const req = http.request({
+        host: u.hostname, port: u.port, path: u.pathname + u.search, method: 'GET',
+        headers: {
+          Connection: 'Upgrade', Upgrade: 'websocket',
+          'Sec-WebSocket-Key': key, 'Sec-WebSocket-Version': '13',
+        },
+      });
+      req.on('upgrade', (res, socket) => {
+        this.socket = socket;
+        socket.on('data', d => this._onData(d));
+        socket.on('error', () => {});
+        resolve();
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+  _onData(chunk) {
+    this.buf = Buffer.concat([this.buf, chunk]);
+    for (;;) {
+      if (this.buf.length < 2) return;
+      const b1 = this.buf[1];
+      let len = b1 & 0x7f, off = 2;
+      if (len === 126) { if (this.buf.length < 4) return; len = this.buf.readUInt16BE(2); off = 4; }
+      else if (len === 127) { if (this.buf.length < 10) return; len = Number(this.buf.readBigUInt64BE(2)); off = 10; }
+      if (this.buf.length < off + len) return;
+      const payload = this.buf.slice(off, off + len).toString('utf8');
+      this.buf = this.buf.slice(off + len);
+      let msg;
+      try { msg = JSON.parse(payload); } catch { continue; }
+      if (msg.id && this.pending.has(msg.id)) {
+        const { resolve, reject } = this.pending.get(msg.id);
+        this.pending.delete(msg.id);
+        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
+      } else if (msg.method) {
+        this.handlers.forEach(h => h(msg));
+      }
+    }
+  }
+  send(method, params) {
+    const id = ++this.seq;
+    const body = Buffer.from(JSON.stringify({ id, method, params: params || {} }));
+    const mask = crypto.randomBytes(4);
+    const masked = Buffer.alloc(body.length);
+    for (let i = 0; i < body.length; i++) masked[i] = body[i] ^ mask[i % 4];
+    let header;
+    if (body.length < 126) header = Buffer.from([0x81, 0x80 | body.length]);
+    else if (body.length < 65536) {
+      header = Buffer.alloc(4);
+      header[0] = 0x81; header[1] = 0xfe; header.writeUInt16BE(body.length, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x81; header[1] = 0xff; header.writeBigUInt64BE(BigInt(body.length), 2);
+    }
+    this.socket.write(Buffer.concat([header, mask, masked]));
+    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+  }
+  on(fn) { this.handlers.push(fn); }
+  close() { try { this.socket.destroy(); } catch {} }
+}
+
+/* ------------------------------------------------------------------ harness */
+
+const results = [];
+const check = (name, pass, detail) => {
+  results.push({ name, pass, detail });
+  console.log(`${pass ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
+};
+
+async function run() {
+  // Browser-free, and first because it is the cheapest way to catch the one failure that a
+  // passing browser run would still hide: a deploy that silently doesn't reach installed phones.
+  const stamped = spawnSync(process.execPath, [path.join(__dirname, 'stamp-sw.js'), '--check'],
+    { encoding: 'utf8' });
+  check('build: service-worker cache stamp matches the assets on disk', stamped.status === 0,
+    `${stamped.stdout || ''}${stamped.stderr || ''}`.trim().split('\n')[0]);
+
+  const chrome = findChrome();
+  if (!chrome) { console.error('No Chrome/Edge found; cannot smoke test.'); process.exit(2); }
+
+  const port = 9222 + Math.floor(Math.random() * 500);
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'isf-smoke-'));
+  const proc = spawn(chrome, [
+    `--remote-debugging-port=${port}`,
+    `--user-data-dir=${profile}`,
+    '--headless=new',
+    '--no-first-run', '--no-default-browser-check', '--disable-gpu',
+    '--window-size=414,896',                      // a phone-ish viewport
+    'about:blank',
+  ], { stdio: 'ignore' });
+
+  try {
+    await waitPort(port, 20000);
+    const version = await getJson(`http://127.0.0.1:${port}/json/version`);
+    const ws = new WS(version.webSocketDebuggerUrl);
+    await ws.connect();
+
+    // Attach to a fresh tab so we get page-scoped events.
+    const { targetId } = await ws.send('Target.createTarget', { url: 'about:blank' });
+    const { sessionId } = await ws.send('Target.attachToTarget', { targetId, flatten: true });
+    const sess = {
+      seq: 0,
+      send: async (method, params) => {
+        const id = ++ws.seq;
+        const body = Buffer.from(JSON.stringify({ id, method, params: params || {}, sessionId }));
+        const mask = crypto.randomBytes(4);
+        const masked = Buffer.alloc(body.length);
+        for (let i = 0; i < body.length; i++) masked[i] = body[i] ^ mask[i % 4];
+        let header;
+        if (body.length < 126) header = Buffer.from([0x81, 0x80 | body.length]);
+        else if (body.length < 65536) {
+          header = Buffer.alloc(4); header[0] = 0x81; header[1] = 0xfe; header.writeUInt16BE(body.length, 2);
+        } else {
+          header = Buffer.alloc(10); header[0] = 0x81; header[1] = 0xff; header.writeBigUInt64BE(BigInt(body.length), 2);
+        }
+        ws.socket.write(Buffer.concat([header, mask, masked]));
+        return new Promise((resolve, reject) => ws.pending.set(id, { resolve, reject }));
+      },
+    };
+
+    const errors = [], failed = [];
+    ws.on(msg => {
+      if (msg.method === 'Runtime.consoleAPICalled' && ['error', 'warning'].includes(msg.params.type)) {
+        const text = (msg.params.args || []).map(a => a.value ?? a.description ?? a.type).join(' ');
+        if (msg.params.type === 'error') errors.push(text);
+      }
+      if (msg.method === 'Runtime.exceptionThrown') {
+        const d = msg.params.exceptionDetails;
+        errors.push(`${d.text} ${d.exception ? d.exception.description || '' : ''}`.trim());
+      }
+      if (msg.method === 'Network.loadingFailed') failed.push(msg.params.errorText);
+    });
+
+    await sess.send('Runtime.enable');
+    await sess.send('Network.enable');
+    await sess.send('Page.enable');
+    // Headless Chrome reports a dark colour-scheme preference by default. The fair runs in
+    // August daylight, so light is the case to verify unless --dark is passed.
+    await sess.send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: process.argv.includes('--dark') ? 'dark' : 'light' }],
+    }).catch(() => {});
+    await sess.send('Emulation.setGeolocationOverride', { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 12 });
+    await sess.send('Browser.grantPermissions', {
+      origin: new URL(BASE).origin,
+      permissions: ['geolocation'],
+    }).catch(() => {});
+
+    const evaluate = async (expr) => {
+      const r = await sess.send('Runtime.evaluate', {
+        expression: expr, returnByValue: true, awaitPromise: true,
+      });
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + ' ' + JSON.stringify(r.result && r.result.value));
+      return r.result.value;
+    };
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    // Screenshots are opt-in (--shots DIR): handy for eyeballing layout, but the checks below
+    // are what actually gate the run.
+    const shotDir = process.argv.includes('--shots')
+      ? process.argv[process.argv.indexOf('--shots') + 1] : null;
+    if (shotDir) fs.mkdirSync(shotDir, { recursive: true });
+    const shot = async (name) => {
+      if (!shotDir) return;
+      const { data } = await sess.send('Page.captureScreenshot', { format: 'png' });
+      fs.writeFileSync(path.join(shotDir, `${name}.png`), Buffer.from(data, 'base64'));
+    };
+
+    // ---------------------------------------------------------------- index
+    await sess.send('Page.navigate', { url: BASE + 'index.html' });
+    await sleep(2200);
+
+    check('index: data loaded', await evaluate('!!(window.FAIR && window.FAIR.stands.length)'),
+      `${await evaluate('window.FAIR ? window.FAIR.stands.length : 0')} stands`);
+    check('index: map drew buildings',
+      (await evaluate('document.querySelectorAll("#map .bldg").length')) > 50,
+      `${await evaluate('document.querySelectorAll("#map .bldg").length')} footprints`);
+    check('index: geolocation fix accepted',
+      (await evaluate('window.Geo.snapshot().status')) === 'ok',
+      `status=${await evaluate('window.Geo.snapshot().status')}`);
+    check('index: you-are-here drawn',
+      (await evaluate('document.querySelectorAll("#map .me-dot").length')) === 1);
+
+    // Flow 1 — search for curly fries
+    await evaluate(`(() => { const q=document.getElementById('q'); q.value='curly fries';
+      q.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    await sleep(450);
+    const first = await evaluate(`(() => {
+      const r = document.querySelector('#sheet-body .result');
+      return r ? { name: r.querySelector('.name').textContent.trim(),
+                   sub: r.querySelector('.sub').textContent.trim(),
+                   dist: (r.querySelector('.dist b')||{}).textContent || null } : null; })()`);
+    check('flow: "curly fries" finds Fair Food Fridays',
+      !!first && /curly fries/i.test(first.name) && /Fair Food Fridays/i.test(first.sub),
+      first ? `${first.name} — ${first.sub} — ${first.dist}` : 'no result');
+    check('flow: distance shown when located', !!(first && first.dist), first && first.dist);
+    await shot('01-search-curly-fries');
+
+    // Flow 2 — typo tolerance
+    await evaluate(`(() => { const q=document.getElementById('q'); q.value='fired rice';
+      q.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    await sleep(450);
+    const typo = await evaluate(`(() => {
+      const n=document.querySelector('#sheet-body .result .name');
+      const note=document.querySelector('#sheet-body .note');
+      return { top: n?n.textContent.trim():null, note: note?note.textContent.trim():null }; })()`);
+    check('flow: "fired rice" degrades to a rice dish', !!typo.top && /rice/i.test(typo.top),
+      `${typo.top} / ${typo.note || 'no note'}`);
+
+    // Flow 3 — water chip, nearest first
+    await evaluate(`document.querySelector('.chip[data-chip="water"]').click()`);
+    await sleep(400);
+    const water = await evaluate(`(() => {
+      const rows=[...document.querySelectorAll('#sheet-body .result')].slice(0,3).map(r=>({
+        name:r.querySelector('.name').textContent.trim(),
+        dist:(r.querySelector('.dist b')||{}).textContent||null }));
+      return rows; })()`);
+    const dists = water.map(w => parseFloat((w.dist || '').replace(/[^\d.]/g, '')));
+    check('flow: water chip lists nearest first',
+      water.length >= 2 && dists[0] <= dists[1],
+      water.map(w => `${w.name} ${w.dist}`).join(' | '));
+
+    // Flow 4 — open directions
+    await evaluate(`document.querySelector('#sheet-body .result').click()`);
+    await sleep(400);
+    const dir = await evaluate(`(() => {
+      const big=document.querySelector('#sheet-body .dir-live .big');
+      const small=document.querySelector('#sheet-body .dir-live .small');
+      const maps=document.querySelector('#sheet-body a.btn.primary');
+      const line=document.querySelectorAll('#map .route-line').length;
+      return { big: big?big.textContent.trim():null, small: small?small.textContent.trim():null,
+               maps: maps?maps.getAttribute('href'):null, line }; })()`);
+    check('flow: directions show live distance + heading', !!dir.big && !!dir.small,
+      `${dir.big} — ${dir.small}`);
+    check('flow: straight line drawn to target', dir.line === 1);
+    await shot('02-directions');
+    check('flow: Google Maps walking hand-off',
+      !!dir.maps && /travelmode=walking/.test(dir.maps) && /origin=41\.59/.test(dir.maps));
+
+    // ---------------------------------------------------------------- other pages
+    await sess.send('Page.navigate', { url: BASE + 'foods.html' });
+    await sleep(1500);
+    check('foods: ranked list rendered',
+      (await evaluate('document.querySelectorAll("#ranked .food").length')) === 11,
+      `${await evaluate('document.querySelectorAll("#ranked .food").length')} ranked`);
+    check('foods: all-new list rendered',
+      (await evaluate('document.querySelectorAll("#all .food").length')) > 40,
+      `${await evaluate('document.querySelectorAll("#all .food").length')} items`);
+    await shot('03-foods');
+
+    await sess.send('Page.navigate', { url: BASE + 'info.html' });
+    await sleep(1500);
+    check('info: water table rendered',
+      (await evaluate('document.querySelectorAll("#water tr").length')) > 20);
+    check('info: accuracy table rendered',
+      (await evaluate('document.querySelectorAll("#accuracy tr").length')) === 6);
+    await shot('04-info');
+
+    // ---------------------------------------------------------------- offline
+    await sess.send('Page.navigate', { url: BASE + 'index.html' });
+    await sleep(2500);                                    // let the service worker install
+    const swReady = await evaluate(`navigator.serviceWorker.ready.then(r=>!!r.active).catch(()=>false)`);
+    check('offline: service worker active', swReady === true);
+
+    await sess.send('Network.emulateNetworkConditions', {
+      offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+    });
+    await sess.send('Page.navigate', { url: BASE + 'index.html' });
+    await sleep(2200);
+    const offline = await evaluate(`({
+      stands: (window.FAIR && window.FAIR.stands.length) || 0,
+      bldgs: document.querySelectorAll('#map .bldg').length })`);
+    check('offline: app boots with no network',
+      offline.stands > 200 && offline.bldgs > 50,
+      `${offline.stands} stands, ${offline.bldgs} footprints`);
+
+    const offlineSearch = await evaluate(`(() => { const q=document.getElementById('q');
+      q.value='corn dog'; q.dispatchEvent(new Event('input',{bubbles:true}));
+      return new Promise(r=>setTimeout(()=>r(document.querySelectorAll('#sheet-body .result').length),400)); })()`);
+    check('offline: search still works', offlineSearch > 0, `${offlineSearch} results`);
+
+    // The readout asks the active worker for its cache name over a MessageChannel, so this also
+    // proves that round-trip works — and it is done with the network off on purpose, since a
+    // version you can only read when online is no use for working out what a phone is running.
+    await sess.send('Page.navigate', { url: BASE + 'info.html' });
+    await sleep(1800);
+    const shownVer = await evaluate(`(document.getElementById('appver')||{}).textContent || ''`);
+    check('offline: version readout names the active cache',
+      /^isf-2026-[0-9a-f]{8}$/.test(shownVer), shownVer || '(empty)');
+
+    await sess.send('Network.emulateNetworkConditions', {
+      offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+    });
+
+    // ---------------------------------------------------------------- off-site behaviour
+    await sess.send('Emulation.setGeolocationOverride', { latitude: 40.7128, longitude: -74.0060, accuracy: 12 });
+    await sess.send('Page.navigate', { url: BASE + 'index.html' });
+    await sleep(2200);
+    await evaluate(`(() => { const q=document.getElementById('q'); q.value='corn dog';
+      q.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    await sleep(500);
+    const off = await evaluate(`({
+      status: window.Geo.snapshot().status,
+      hasDist: !!document.querySelector('#sheet-body .result .dist'),
+      note: (document.querySelector('#sheet-body .note')||{}).textContent || null })`);
+    check('offsite: detected as away from the fairgrounds', off.status === 'offsite', off.status);
+    check('offsite: distances suppressed rather than absurd', off.hasDist === false, off.note);
+
+    // ---------------------------------------------------------------- update cycle (opt-in)
+    //
+    // The only check that exercises what the stamp exists for: an *already installed* worker being
+    // replaced by a new build, with the page ending up on it and no manual refresh. Everything
+    // above only ever does a first install, where shell.js deliberately does not reload.
+    //
+    // Opt-in via --update-cycle because it has to mutate a precached file on disk to produce a
+    // genuinely different build. The original bytes are restored and re-stamped either way.
+    if (process.argv.includes('--update-cycle')) {
+      const asset = path.join(__dirname, '..', 'css', 'app.css');
+      const swFile = path.join(__dirname, '..', 'sw.js');
+      const original = fs.readFileSync(asset);
+      const restamp = () => spawnSync(process.execPath, [path.join(__dirname, 'stamp-sw.js')],
+        { encoding: 'utf8' });
+      const cacheName = () =>
+        (fs.readFileSync(swFile, 'utf8').match(/const CACHE = '([^']*)'/) || [])[1];
+
+      try {
+        await sess.send('Page.navigate', { url: BASE + 'info.html' });
+        await sleep(1800);
+        const before = await evaluate(`(document.getElementById('appver')||{}).textContent||''`);
+
+        fs.writeFileSync(asset, Buffer.concat([original, Buffer.from('\n/* update-cycle */\n')]));
+        restamp();
+        const wanted = cacheName();
+
+        // Force the update check rather than relying on navigation heuristics, then let
+        // shell.js's controllerchange handler reload the page onto the new worker.
+        await evaluate(`navigator.serviceWorker.getRegistration()
+          .then(r => r && r.update()).then(() => 1).catch(() => 0)`);
+        await sleep(4000);
+        const after = await evaluate(`(document.getElementById('appver')||{}).textContent||''`);
+
+        check('update: an installed build is replaced and the page reloads onto it',
+          !!wanted && after === wanted && after !== before,
+          `${before || '(empty)'} -> ${after || '(empty)'}, expected ${wanted}`);
+      } finally {
+        fs.writeFileSync(asset, original);
+        restamp();
+      }
+    }
+
+    // ---------------------------------------------------------------- console health
+    const realErrors = errors.filter(e => !/favicon/i.test(e));
+    check('no console errors or exceptions', realErrors.length === 0,
+      realErrors.slice(0, 4).join(' || ') || 'clean');
+
+    ws.close();
+  } finally {
+    proc.kill();
+    try { fs.rmSync(profile, { recursive: true, force: true }); } catch {}
+  }
+
+  const failedCount = results.filter(r => !r.pass).length;
+  console.log(`\n${results.length - failedCount}/${results.length} checks passed`);
+  process.exit(failedCount ? 1 : 0);
+}
+
+run().catch(e => { console.error('smoke test error:', e); process.exit(2); });

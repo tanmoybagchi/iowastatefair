@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#b7202e">
+<meta name="description" content="Every new food at the 2026 Iowa State Fair, with the official People's Choice finalists, prices and dietary flags.">
+<title>New foods — Iowa State Fair 2026</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <span class="wordmark">New foods</span>
+    <span class="dates">Aug 13–23, 2026<br>Fair Spirit</span>
+  </header>
+
+  <main class="page">
+    <section class="card">
+      <h2>People’s Choice</h2>
+      <p class="provenance" id="voting"></p>
+      <div id="ranked"></div>
+    </section>
+
+    <section class="card">
+      <h2>All new for 2026</h2>
+      <div class="chips" role="group" aria-label="Filters" style="margin-bottom:10px">
+        <button class="chip diet" type="button" data-diet="V">Vegan</button>
+        <button class="chip diet" type="button" data-diet="VG">Vegetarian</button>
+        <button class="chip diet" type="button" data-diet="GF">Gluten-friendly</button>
+        <button class="chip diet" type="button" data-diet="DF">Dairy-free</button>
+      </div>
+      <div id="all"></div>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="Main">
+    <a href="./index.html"><span class="ico" aria-hidden="true">🧭</span>Find</a>
+    <a href="./foods.html" aria-current="page"><span class="ico" aria-hidden="true">✨</span>New foods</a>
+    <a href="./info.html"><span class="ico" aria-hidden="true">ℹ️</span>Info</a>
+  </nav>
+</div>
+
+<script src="./js/data.js"></script>
+<script src="./js/geo.js"></script>
+<script src="./js/foods.js"></script>
+<script src="./js/shell.js"></script>
+</body>
+</html>

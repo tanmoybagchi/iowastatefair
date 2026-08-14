@@ -1,0 +1,13 @@
+# Normalise line endings to LF everywhere, including Windows checkouts.
+#
+# This is not cosmetic here. tools/stamp-sw.js derives the service-worker cache name from a hash
+# of each precached file's bytes, so a checkout that swapped LF for CRLF would compute a different
+# stamp from the one committed — `stamp-sw.js --check` would fail on a fresh clone, and GitHub
+# Pages would serve bytes that don't match what the stamp was calculated over. Pinning eol=lf
+# keeps the hash reproducible across machines.
+* text=auto eol=lf
+
+# Sources git should never touch.
+*.pdf binary
+*.png binary
+*.jpg binary

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#b7202e">
+<meta name="description" content="Hours, gates, water refill stations and data sources for the 2026 Iowa State Fair finder.">
+<title>Info — Iowa State Fair 2026</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <span class="wordmark">Fair info</span>
+    <span class="dates">Aug 13–23, 2026<br>Fair Spirit</span>
+  </header>
+
+  <main class="page">
+    <section class="card">
+      <h2>Hours</h2>
+      <div id="hours"></div>
+      <p class="provenance">Times are subject to change — the fair’s own caveat.</p>
+    </section>
+
+    <section class="card">
+      <h2>Water refill stations</h2>
+      <p class="provenance">
+        From the fair’s official Water Fountain &amp; Refill Station map, sponsored by Des Moines
+        Water Works and Delta Dental. Blue Ribbon Foundation booths sell bottled water; the rest
+        are free.
+      </p>
+      <div id="water"></div>
+    </section>
+
+    <section class="card">
+      <h2>Gates</h2>
+      <p class="provenance" id="gatenote"></p>
+      <div id="gates"></div>
+    </section>
+
+    <section class="card">
+      <h2>Getting there</h2>
+      <dl class="kv">
+        <dt>Address</dt><dd id="addr"></dd>
+        <dt>Phone</dt><dd id="phone"></dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <h2>Where this data comes from</h2>
+      <p class="provenance">
+        Everything in this app is built from documents the Iowa State Fair publishes, plus
+        OpenStreetMap for building shapes. Nothing is invented, and nothing is fetched at
+        runtime — which is why it keeps working when the cell network doesn’t.
+      </p>
+      <ul class="provenance" id="sources"></ul>
+      <h3>How accurate are the pins?</h3>
+      <p class="provenance">
+        The fair describes vendor locations in words (“Outside NE Corner of VI Bldg”), not
+        coordinates, so each pin is derived and its precision varies. Anything imprecise is
+        labelled <span class="badge approx">approx. location</span> in the app.
+      </p>
+      <table class="tbl" id="accuracy"></table>
+      <p class="provenance" id="counts" style="margin-top:10px"></p>
+      <h3>Known gaps</h3>
+      <ul class="provenance">
+        <li>Pins point you to the right building, corner or concourse — not to an exact serving window.</li>
+        <li>The fair’s own vendor list truncates some menus mid-item; those stands are marked in the app and a few items may be missing.</li>
+        <li>The dietary lists are the fair’s, and the fair states they’re informational only — check with the vendor if it matters medically.</li>
+        <li>One stand’s published location is literally “TBD”, so it has no pin.</li>
+        <li>Concert lineups, ticket prices, parking and competition schedules are out of scope.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Offline copy</h2>
+      <p class="provenance">
+        The app keeps a complete copy of itself on this device, which is what lets it work with no
+        signal. This is the version of that copy — it updates on its own next time you open the app
+        with a connection.
+      </p>
+      <p class="verrow">
+        <button type="button" id="appver" class="verbtn">checking…</button>
+        <span class="provenance">Tap to delete it and download a fresh one. Needs a connection,
+        so don’t do this at the fair unless something is clearly broken.</span>
+      </p>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="Main">
+    <a href="./index.html"><span class="ico" aria-hidden="true">🧭</span>Find</a>
+    <a href="./foods.html"><span class="ico" aria-hidden="true">✨</span>New foods</a>
+    <a href="./info.html" aria-current="page"><span class="ico" aria-hidden="true">ℹ️</span>Info</a>
+  </nav>
+</div>
+
+<script src="./js/data.js"></script>
+<script src="./js/geo.js"></script>
+<script src="./js/info.js"></script>
+<script src="./js/shell.js"></script>
+</body>
+</html>

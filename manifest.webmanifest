@@ -1,0 +1,19 @@
+{
+  "name": "Iowa State Fair 2026 — Find it",
+  "short_name": "Fair Finder",
+  "description": "Find food, water and anything else at the 2026 Iowa State Fair, sorted by distance from where you're standing. Works offline.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#b7202e",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

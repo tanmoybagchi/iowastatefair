@@ -1,0 +1,106 @@
+'use strict';
+/*
+ * sw.js — offline cache.
+ *
+ * The whole app is precached on install and served cache-first afterwards. That is the right
+ * strategy here rather than a compromise: the fairgrounds data cannot change during the fair,
+ * and the cell network is unusable once ~100,000 people are on it. Once you've loaded this
+ * page on the drive in, it keeps working all day with the radio off.
+ *
+ * The CACHE name is generated — `tools/stamp-sw.js` rewrites it from a hash of everything in
+ * ASSETS, and `tools/build-data.js` calls that automatically. Don't edit it by hand; if you add
+ * a file to ASSETS, run `node tools/stamp-sw.js` and the stamp follows. The stamp is what makes
+ * a deploy roll out at all: it changes this file's bytes, which is the only thing that makes a
+ * browser re-run install.
+ */
+
+const CACHE = 'isf-2026-7ad18590';
+
+// Relative URLs so the same worker functions under a subpath (Caddy /fair/, GitHub Pages).
+const ASSETS = [
+  './',
+  './index.html',
+  './foods.html',
+  './info.html',
+  './css/app.css',
+  './js/data.js',
+  './js/geo.js',
+  './js/fuzzy.js',
+  './js/fairmap.js',
+  './js/find.js',
+  './js/foods.js',
+  './js/info.js',
+  './js/shell.js',
+  './manifest.webmanifest',
+];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    // addAll rejects entirely if any single request fails, which would leave the app with no
+    // cache at all. Add individually so one bad entry can't break offline support.
+    await Promise.all(ASSETS.map(async (url) => {
+      try { await cache.add(new Request(url, { cache: 'reload' })); }
+      catch (e) { console.warn('[sw] could not cache', url, e); }
+    }));
+    await self.skipWaiting();
+  })());
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter(n => n !== CACHE).map(n => caches.delete(n)));
+    await self.clients.claim();
+  })());
+});
+
+// The info page asks which copy of the app this device is actually running. Answering from the
+// worker rather than from a constant in the page means the answer is the truth even when the page
+// itself was served from a stale cache.
+self.addEventListener('message', (event) => {
+  if (!event.data || event.data.type !== 'version') return;
+  const reply = { version: CACHE };
+  if (event.ports && event.ports[0]) event.ports[0].postMessage(reply);
+  else if (event.source) event.source.postMessage(reply);
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;   // let Google Maps links etc. go straight out
+
+  event.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    const hit = await cache.match(req, { ignoreSearch: true });
+    if (hit) {
+      // Refresh in the background so a rebuild is picked up next visit, without ever making
+      // the user wait on the network.
+      event.waitUntil((async () => {
+        try {
+          const fresh = await fetch(req);
+          if (fresh && fresh.ok) await cache.put(req, fresh.clone());
+        } catch { /* offline — the cached copy is the answer */ }
+      })());
+      return hit;
+    }
+
+    try {
+      const res = await fetch(req);
+      if (res && res.ok) cache.put(req, res.clone());
+      return res;
+    } catch (e) {
+      // Navigations must still resolve to something usable when offline and uncached.
+      if (req.mode === 'navigate') {
+        const fallback = await cache.match('./index.html');
+        if (fallback) return fallback;
+      }
+      return new Response('Offline and not cached yet.', {
+        status: 503,
+        headers: { 'Content-Type': 'text/plain' },
+      });
+    }
+  })());
+});
