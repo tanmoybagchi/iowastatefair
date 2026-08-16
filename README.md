@@ -100,6 +100,14 @@ Varied Industries Building fronting **north** onto the same road, with no specia
 ### Known gaps, stated plainly
 
 - Pins point to the right building, corner or concourse — **not to an exact serving window.**
+- **A displayed distance carries both errors, and says so.** Each pin's tier implies a radius
+  (`js/geo.js`, `PIN_ERROR_FT`) which is combined in quadrature with the phone's own reported
+  accuracy. Once you are closer than the two together, the app stops quoting a figure and says
+  "within about 150 ft" plus the fair's own words for where the stand is — because at that range a
+  bearing is noise. A fix older than 20 s is labelled as stale rather than shown as current, which
+  matters because the GPS watch is dropped while the app is off screen. This came from a field
+  report of the app "saying I was there" a block early; that symptom is what a kept-but-stale fix,
+  a 150 ft grid pin, or both at once look like from the outside.
 - The fair's vendor list **truncates 49 menus mid-item** at a column break. Those stands are
   flagged in the app and a few of their items may be missing. Truncated text is carried through
   as-is rather than guessed at.
@@ -152,14 +160,15 @@ node tools/smoke.js http://localhost:8099/
 node tools/smoke.js http://localhost:8099/ --update-cycle   # + the update path (see below)
 ```
 
-30 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
+34 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
 map draws, geolocation is accepted, the four core flows work ("curly fries", the typo case,
-nearest-water, directions), **closing the result list stays closed across a location update**, the
-other two pages render, the service worker activates, **the app boots, searches and reports its
-version with the network switched off**, being away from the fairgrounds suppresses distances
-instead of printing nonsense, and the console is clean.
+nearest-water, directions), **closing the result list stays closed across a location update**,
+**a distance inside its own uncertainty is never quoted as a figure and the walking screen admits a
+rough fix**, the other two pages render, the service worker activates, **the app boots, searches
+and reports its version with the network switched off**, being away from the fairgrounds suppresses
+distances instead of printing nonsense, and the console is clean.
 
-`--update-cycle` adds a 31st check, and it is the only one that exercises an *already installed*
+`--update-cycle` adds a 35th check, and it is the only one that exercises an *already installed*
 worker being replaced by a new build — everything else does a first install, where `shell.js`
 deliberately does not reload. It appends a comment to `css/app.css`, re-stamps, forces an update
 check, and asserts the page comes back reporting the new cache name. It restores the original
@@ -171,7 +180,9 @@ disabled, it fails with the page still reporting the old cache, so it is not a v
 
 **Not covered:** real-GPS accuracy and the device compass. Those are verified by DevTools
 override and explicit fallback handling, not by standing on the fairgrounds. Treat compass
-behaviour on a physical phone as untested. The reset button on the info page is also untested —
+behaviour on a physical phone as untested. One field report exists (16 Aug 2026): the app "said I
+was there" when the user was about a block away — see [Known gaps](#known-gaps-stated-plainly),
+which is where that led. The reset button on the info page is also untested —
 it goes through `confirm()`, which headless Chrome will not surface.
 
 ## Updates

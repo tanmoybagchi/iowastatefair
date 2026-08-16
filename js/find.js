@@ -83,9 +83,18 @@
       const s = obj.stand;
       return { kind: 'stand', label: s.name, sub: locLabel(s), lat: s.lat, lon: s.lon, approx: isApprox(s), stand: s };
     }
+    /*
+     * `src` and `conf` are carried through on purpose: they're how Geo.pinErrorFt() knows how
+     * vague a pin is. A stand place carries its whole stand record, but these three flatten to a
+     * new object, and leaving the two fields behind quietly gave a water fountain at a building
+     * centroid the same claimed precision as a surveyed point.
+     */
     if (obj.type === 'landmark') {
       const l = obj.landmark;
-      return { kind: 'landmark', label: l.name, sub: l.grid ? `Map grid ${l.grid}` : 'Fairgrounds', lat: l.lat, lon: l.lon, approx: l.conf !== 'high' };
+      return {
+        kind: 'landmark', label: l.name, sub: l.grid ? `Map grid ${l.grid}` : 'Fairgrounds',
+        lat: l.lat, lon: l.lon, approx: l.conf !== 'high', src: l.src, conf: l.conf,
+      };
     }
     if (obj.type === 'water') {
       const w = obj.water;
@@ -96,11 +105,15 @@
         sub: w.detail,
         lat: w.lat, lon: w.lon,
         approx: w.conf !== 'high',
+        src: w.src, conf: w.conf,
         tag: paid ? 'for sale' : (w.kind === 'both' ? 'bottle refill' : 'fountain'),
       };
     }
     const a = obj.amenity;
-    return { kind: 'amenity', label: a.name, sub: a.detail || `At ${a.at}`, lat: a.lat, lon: a.lon, approx: a.conf !== 'high' };
+    return {
+      kind: 'amenity', label: a.name, sub: a.detail || `At ${a.at}`,
+      lat: a.lat, lon: a.lon, approx: a.conf !== 'high', src: a.src, conf: a.conf,
+    };
   }
 
   const isApprox = s => s.src === 'grid' || s.src === 'offset' || s.conf === 'low';
@@ -124,6 +137,16 @@
     // Locations are normally mixed case; all-caps means it came from the raw space description.
     return loc === loc.toUpperCase() && /[A-Z]{4}/.test(loc) ? titleCase(loc) : loc;
   }
+
+  /**
+   * The fair's own words for where something is, for use when we've run out of useful geometry.
+   * Reads the stand's location line rather than `place.sub`, which for an item already carries the
+   * stand name and would read "look for Barksdale, Barksdale · North of Ag Bldg".
+   */
+  const hereWords = p => (p.stand ? locLabel(p.stand) : (p.sub || ''));
+
+  /** How old a fix is, in words. Seconds while that's meaningful, then minutes. */
+  const ageWords = ms => (ms >= 90000 ? `${Math.round(ms / 60000)} min` : `${Math.round(ms / 1000)} s`);
 
   function nearestOf(list) {
     const g = Geo.snapshot();
@@ -180,10 +203,17 @@
 
   // ------------------------------------------------------------------ rendering
 
+  /*
+   * The distance column. Inside the combined pin + GPS uncertainty it says so rather than printing
+   * a figure: a walk time under a slop of 150 ft is two claims where we can't honestly make one.
+   */
   function distanceBits(place) {
     const d = Geo.distanceTo(place);
     if (d == null) return '';
-    return `<div class="dist"><b>${Geo.formatDistance(d)}</b><span>${Geo.formatWalk(d)}</span></div>`;
+    const unc = Geo.uncertaintyFt(place);
+    const rough = unc != null && d <= unc;
+    return `<div class="dist${rough ? ' rough' : ''}"><b>${Geo.formatDistanceApprox(d, unc)}</b>${
+      rough ? '' : `<span>${Geo.formatWalk(d)}</span>`}</div>`;
   }
 
   function badgesFor(place) {
@@ -199,7 +229,9 @@
     if (place.tag) b.push(`<span class="badge">${place.tag}</span>`);
     if (place.stand && place.stand.group === 'beer') b.push('<span class="badge beer">Serves alcohol</span>');
     if (place.approx) b.push('<span class="badge approx">approx. location</span>');
-    if (place.alsoAt) b.push(`<span class="badge">at ${place.alsoAt} stands</span>`);
+    // "nearest of 4", not "at 4": the pin is one stand we chose, which matters if you had a
+    // particular vendor in mind and we quietly aimed you at a different one.
+    if (place.alsoAt) b.push(`<span class="badge">nearest of ${place.alsoAt} stands</span>`);
     return b.length ? `<div class="badges">${b.join('')}</div>` : '';
   }
 
@@ -341,9 +373,26 @@
 
     sheetTitle.textContent = 'Walking there';
 
+    const unc = Geo.uncertaintyFt(p);
+    const arrived = d != null && unc != null && d <= unc;
+
     let live;
     if (p.lat == null) {
       live = `<p class="note">The fair lists no location for this one, so we can’t point you to it.</p>`;
+    } else if (arrived) {
+      /*
+       * Close enough that a bearing is noise. Pointing an arrow across 40 ft when the pin itself
+       * could be 150 ft out is how you send someone past the thing they're standing next to, so
+       * hand over to the fair's own words for where the stand is and let them look up.
+       */
+      live = `<div class="dir-live is-here">
+        <div class="arrow static" aria-hidden="true">◎</div>
+        <div>
+          <div class="big">${Geo.formatDistanceApprox(d, unc)}</div>
+          <div class="small">You’re in the area — look for <b>${escapeHtml(p.stand ? p.stand.name : p.label)}</b>${
+            hereWords(p) ? `, ${escapeHtml(hereWords(p))}` : ''}.</div>
+        </div>
+      </div>`;
     } else if (d != null) {
       // If we know the phone's heading, rotate the arrow into a relative direction. Otherwise
       // give the compass bearing in words, which is still actionable.
@@ -351,7 +400,7 @@
       live = `<div class="dir-live">
         <div class="arrow" id="arrow" style="transform:rotate(${(rel != null ? rel : 0).toFixed(0)}deg)" aria-hidden="true">↑</div>
         <div>
-          <div class="big">${Geo.formatDistance(d)}</div>
+          <div class="big">${Geo.formatDistanceApprox(d, unc)}</div>
           <div class="small">${Geo.formatWalk(d)} · head ${Geo.compassName(brg)}${rel != null ? '' : ' (compass off)'}</div>
         </div>
       </div>`;
@@ -361,6 +410,21 @@
         : 'Turn on location to get live distance and direction.'}</p>`;
     }
 
+    /*
+     * Cautions belong here above all, and until now lived only on the results list. This is the
+     * screen someone holds while walking, so it's the screen that has to admit when the number in
+     * it can't be trusted: a fix from before you set off, or one too vague to act on.
+     */
+    const cautions = [];
+    if (d != null && g.stale) {
+      cautions.push(['warn', `This is measured from a fix ${ageWords(g.ageMs)} old — if you’ve just ` +
+        `reopened the app, give it a moment to catch up before you trust it.`]);
+    }
+    if (d != null && g.poor) {
+      cautions.push(['', `Your location is only accurate to about ${Geo.formatDistance(g.accuracyFt)}, ` +
+        `so this distance is rough.`]);
+    }
+
     const maps = p.lat != null ? Geo.mapsUrl(p) : null;
     const menu = p.stand && p.stand.id != null ? menuFor(p.stand) : '';
 
@@ -368,10 +432,11 @@
       <div class="where">${escapeHtml(p.label)}</div>
       <div class="at">${escapeHtml(p.sub || '')}</div>
       ${badgesFor(p)}
+      ${cautions.map(([cls, text]) => `<p class="note ${cls}">${escapeHtml(text)}</p>`).join('')}
       ${live}
       <div class="btnrow">
         ${maps ? `<a class="btn primary" href="${maps}" target="_blank" rel="noopener">Open in Google Maps</a>` : ''}
-        ${g.heading == null && p.lat != null ? '<button class="btn" id="compass" type="button">Use compass</button>' : ''}
+        ${g.heading == null && p.lat != null && !arrived ? '<button class="btn" id="compass" type="button">Use compass</button>' : ''}
         <button class="btn ghost" id="back" type="button">Back to list</button>
       </div>
       ${p.lat != null ? `<p class="hint">

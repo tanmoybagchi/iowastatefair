@@ -286,15 +286,22 @@ async function run() {
     // Flow 3 — water chip, nearest first
     await evaluate(`document.querySelector('.chip[data-chip="water"]').click()`);
     await sleep(400);
+    /*
+     * Ordering is asserted against the real distances, not the rendered labels. A row close enough
+     * to be inside its uncertainty reads "within about 100 ft" rather than a figure, and that text
+     * is deliberately not monotonic with distance — parsing digits out of it would make this check
+     * fail on correct output.
+     */
     const water = await evaluate(`(() => {
-      const rows=[...document.querySelectorAll('#sheet-body .result')].slice(0,3).map(r=>({
-        name:r.querySelector('.name').textContent.trim(),
-        dist:(r.querySelector('.dist b')||{}).textContent||null }));
-      return rows; })()`);
-    const dists = water.map(w => parseFloat((w.dist || '').replace(/[^\d.]/g, '')));
+      return [...document.querySelectorAll('#sheet-body .result')].slice(0, 3).map(r => {
+        const name = r.querySelector('.name').textContent.trim();
+        const rec = window.FAIR.water.find(w => w.at === name.replace(/^Water booth — |^Water at /, ''));
+        return { name,
+                 dist: (r.querySelector('.dist b') || {}).textContent || null,
+                 ft: rec ? Math.round(window.Geo.distanceTo(rec)) : null }; }); })()`);
     check('flow: water chip lists nearest first',
-      water.length >= 2 && dists[0] <= dists[1],
-      water.map(w => `${w.name} ${w.dist}`).join(' | '));
+      water.length >= 2 && water.every(w => w.ft != null) && water[0].ft <= water[1].ft,
+      water.map(w => `${w.name} "${w.dist}" (${w.ft} ft)`).join(' | '));
 
     // Flow 3b — the close button actually closes, and stays closed across a GPS tick.
     //
@@ -360,6 +367,72 @@ async function run() {
     await shot('02-directions');
     check('flow: Google Maps walking hand-off',
       !!dir.maps && /travelmode=walking/.test(dir.maps) && /origin=41\.59/.test(dir.maps));
+
+    /*
+     * Flow 5 — the app doesn't claim more precision than it has.
+     *
+     * Exists because of the first real field report (2026-08-16): "it said I was there but I was
+     * probably a block away". A pin derived from the printed map grid can be 150 ft out, a phone
+     * fix another 100, and the walking screen used to print the sum of that slop as a bold figure
+     * with no caveat at all.
+     */
+    const maths = await evaluate(`({
+      near: window.Geo.formatDistanceApprox(30, 150),
+      far: window.Geo.formatDistanceApprox(400, 150),
+      grid: window.Geo.pinErrorFt({ lat: 41.594, lon: -93.552, src: 'grid' }),
+      edge: window.Geo.pinErrorFt({ lat: 41.594, lon: -93.552, src: 'edge' }),
+      low: window.Geo.pinErrorFt({ lat: 41.594, lon: -93.552, src: 'edge', conf: 'low' }),
+    })`);
+    check('honesty: a distance inside the uncertainty is not quoted as a figure',
+      /within about \d+ ft/.test(maths.near) && !/within/.test(maths.far),
+      `30 ft → "${maths.near}" · 400 ft → "${maths.far}"`);
+    check('honesty: pin vagueness follows how the pin was derived',
+      maths.grid > maths.edge && maths.low >= 150,
+      `grid ${maths.grid} > edge ${maths.edge}, low-confidence ${maths.low}`);
+
+    // A coarse fix must be admitted on the walking screen, not just on the list. The directions
+    // panel is still open from Flow 4, and the geolocation subscriber re-renders it in place.
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 60 });
+    await sleep(1500);
+    const rough = await evaluate(`(() => {
+      const notes = [...document.querySelectorAll('#sheet-body .dir .note')].map(n => n.textContent.trim());
+      const big = document.querySelector('#sheet-body .dir-live .big');
+      return { notes, big: big ? big.textContent.trim() : null }; })()`);
+    check('honesty: the walking screen admits a rough fix',
+      rough.notes.some(t => /accurate to about/.test(t)),
+      rough.notes.join(' | ') || `(no notes; big="${rough.big}")`);
+    await shot('03-rough-fix');
+
+    // Standing on top of an offset-derived pin: a bearing across 40 ft is noise, so the app should
+    // hand over to the fair's own words for where the stand is.
+    const onPin = await evaluate(`(() => {
+      const s = window.FAIR.stands.find(x => x.src === 'offset' && x.lat != null);
+      return { name: s.name, lat: s.lat, lon: s.lon }; })()`);
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: onPin.lat, longitude: onPin.lon, accuracy: 12 });
+    await sleep(900);
+    await evaluate(`(() => { const q = document.getElementById('q');
+      q.value = ${JSON.stringify(onPin.name)}; q.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+    await sleep(600);
+    await evaluate(`document.querySelector('#sheet-body .result').click()`);
+    await sleep(400);
+    const here = await evaluate(`(() => {
+      const live = document.querySelector('#sheet-body .dir-live');
+      const small = document.querySelector('#sheet-body .dir-live .small');
+      const big = document.querySelector('#sheet-body .dir-live .big');
+      return { isHere: !!(live && live.classList.contains('is-here')),
+               small: small ? small.textContent.trim() : null,
+               big: big ? big.textContent.trim() : null }; })()`);
+    check('honesty: standing on a pin swaps the bearing for the fair’s own words',
+      here.isHere && /look for/i.test(here.small || '') && /within about/.test(here.big || ''),
+      `${here.big} — ${here.small}`);
+    await shot('04-in-the-area');
+
+    // Back to a clean, precise fix at the centre of the grounds for the checks that follow.
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 12 });
+    await sleep(600);
 
     // ---------------------------------------------------------------- other pages
     await sess.send('Page.navigate', { url: BASE + 'foods.html' });

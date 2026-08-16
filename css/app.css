@@ -377,6 +377,10 @@ a { color: var(--accent); }
 .result .dist { flex: none; text-align: right; font-variant-numeric: tabular-nums; }
 .result .dist b { display: block; font-size: .95rem; }
 .result .dist span { font-size: .74rem; color: var(--ink-faint); }
+/* "within about 150 ft" is prose, not a figure: narrower, softer, and it must not wrap to
+   three lines in a column sized for "220 ft". */
+.result .dist.rough { max-width: 8.5em; }
+.result .dist.rough b { font-size: .8rem; font-weight: 650; color: var(--ink-soft); }
 
 .badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .badge {
@@ -404,6 +408,10 @@ a { color: var(--accent); }
   background: var(--paper-2);
   border-bottom: 1px solid var(--line);
 }
+/* A note that says the number above it may be wrong has to out-shout the number. */
+.note.warn { background: #fdf0d8; color: #7a4b00; border-color: #f0d9a8; }
+/* Inside the directions panel these are inline blocks, not list headers. */
+.dir .note { border-bottom: 0; border-radius: var(--r); margin: 10px 0 0; }
 
 /* --- directions panel --- */
 .dir { padding: 12px 14px calc(14px + var(--safe-b)); }
@@ -430,6 +438,9 @@ a { color: var(--accent); }
   transition: transform .2s ease-out;
 }
 @media (prefers-reduced-motion: reduce) { .arrow { transition: none; } }
+/* "You're in the area": a target ring rather than a direction, because there isn't a useful one. */
+.arrow.static { background: var(--paper); color: var(--go); border: 2px solid var(--go); transition: none; }
+.dir-live.is-here { border-color: var(--go); }
 .dir-live .big { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; }
 .dir-live .small { font-size: .85rem; color: var(--ink-soft); }
 
@@ -570,4 +581,6 @@ dl.kv dd { margin: 2px 0 0; color: var(--ink-soft); }
   /* Was the one badge left out of this block: a hardcoded near-white tile carrying --ink-faint,
      which in dark resolves to light grey on light grey. It appears on every approximate pin. */
   .badge.approx { background: #2b323d; color: #c3ccd8; border-color: var(--line); }
+  /* Same trap as .badge.new: a hardcoded cream tile would be unreadable here. */
+  .note.warn { background: #40320f; color: #f0d9a8; border-color: #5d4a1a; }
 }

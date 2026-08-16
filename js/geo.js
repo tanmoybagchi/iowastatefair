@@ -16,6 +16,30 @@
   // Beyond this, treat the fix as too vague to give confident distances.
   const POOR_ACCURACY_FT = 100;
 
+  /*
+   * How far a pin might be from the thing it names, by the method that produced it. These are the
+   * upper end of each range published in the accuracy table on the info page — the honest number to
+   * quote is the one you might actually be out by, not the average.
+   *
+   * `inside` is a building's footprint centroid, so on something the size of Varied Industries the
+   * door is a long way from the middle; 100 ft is generous but not pessimistic.
+   */
+  const PIN_ERROR_FT = { edge: 40, inside: 100, offset: 120, grid: 150 };
+
+  // A pin the build flagged low-confidence is at least this vague, whatever method produced it.
+  const LOW_CONF_FT = 150;
+
+  /*
+   * Past this age a fix is called out as stale rather than shown as current.
+   *
+   * This matters because the GPS watch is dropped while the app is off screen (see the
+   * visibilitychange handler below) and the last position is kept on purpose. Pocket the phone,
+   * walk a block, reopen: for a moment every distance is measured from where you were standing
+   * when you last looked. 20 s is long enough not to nag during a normal glance and short enough
+   * to catch that walk.
+   */
+  const FIX_STALE_MS = 20000;
+
   const B = (window.FAIR && window.FAIR.meta && window.FAIR.meta.bounds) || null;
 
   const state = {
@@ -30,11 +54,17 @@
 
   const listeners = new Set();
   const emit = () => listeners.forEach(fn => { try { fn(snapshot()); } catch (e) { console.error(e); } });
-  const snapshot = () => Object.assign({}, state, {
-    /** True when we have a usable position inside the fairgrounds. */
-    usable: state.status === 'ok' && state.lat != null,
-    poor: state.accuracyFt != null && state.accuracyFt > POOR_ACCURACY_FT,
-  });
+  const snapshot = () => {
+    const ageMs = state.updatedAt ? Math.max(0, Date.now() - state.updatedAt) : null;
+    return Object.assign({}, state, {
+      /** True when we have a usable position inside the fairgrounds. */
+      usable: state.status === 'ok' && state.lat != null,
+      poor: state.accuracyFt != null && state.accuracyFt > POOR_ACCURACY_FT,
+      ageMs,
+      /** The fix is old enough that you may well have walked away from it. */
+      stale: ageMs != null && ageMs > FIX_STALE_MS,
+    });
+  };
 
   // ---------------------------------------------------------------- maths
 
@@ -71,6 +101,39 @@
            lon >= B.minLon - pad && lon <= B.maxLon + pad;
   }
 
+  // ---------------------------------------------------------------- uncertainty
+
+  /**
+   * How far this pin might be from the real thing, in feet, or null when we can't say.
+   *
+   * Accepts either a place from the results list (which wraps a stand) or a raw record — stands,
+   * landmarks, water points and amenities all carry the same `src`/`conf` pair.
+   */
+  function pinErrorFt(pt) {
+    if (!pt || pt.lat == null) return null;
+    const rec = pt.stand || pt;
+    const r = PIN_ERROR_FT[rec.src];
+    if (r == null) return rec.conf === 'low' ? LOW_CONF_FT : null;
+    return rec.conf === 'low' ? Math.max(r, LOW_CONF_FT) : r;
+  }
+
+  /**
+   * How far a displayed distance to this point could be out, combining both error sources: the
+   * phone's own fix and the pin's derivation. Added in quadrature because they're independent.
+   *
+   * This is the number that makes "30 ft" honest or not. A stand geocoded from the printed map
+   * grid, seen from a phone with a 60 ft fix, is 160 ft of combined slop — so "30 ft" and "190 ft"
+   * are the same claim, and printing either one as a fact is the thing that gets you sent walking
+   * to the wrong place.
+   */
+  function uncertaintyFt(pt) {
+    const s = snapshot();
+    const gps = s.accuracyFt || 0;
+    const pin = pinErrorFt(pt) || 0;
+    const u = Math.hypot(gps, pin);
+    return u > 0 ? u : null;
+  }
+
   // ---------------------------------------------------------------- formatting
 
   /** Feet under a quarter mile, then miles. Rounded coarsely — false precision reads as fake. */
@@ -79,6 +142,19 @@
     if (ft < 1000) return `${Math.round(ft / 10) * 10} ft`;
     if (ft < 5280) return `${(ft / 5280).toFixed(2).replace(/0$/, '')} mi`;
     return `${(ft / 5280).toFixed(1)} mi`;
+  }
+
+  /**
+   * A distance you can stand behind. Once the distance is inside the combined uncertainty, the
+   * figure means "you're in the area" and nothing more, so that's what it says — quoting "20 ft"
+   * when the slop is 160 ft invites someone to look for a stand that's actually behind them.
+   */
+  function formatDistanceApprox(ft, uncertaintyFtValue) {
+    if (ft == null) return '';
+    if (uncertaintyFtValue != null && ft <= uncertaintyFtValue) {
+      return `within about ${Math.max(25, Math.round(uncertaintyFtValue / 25) * 25)} ft`;
+    }
+    return formatDistance(ft);
   }
 
   function formatWalk(ft) {
@@ -114,10 +190,13 @@
     // Only announce "locating" when there is nothing better to show. On a resume from background
     // we already have a fix, and flipping to 'locating' would blank every distance in the list for
     // a second or two on each return to the app.
-    if (state.lat == null) {
-      state.status = 'locating';
-      emit();
-    }
+    //
+    // Emit either way. On a resume the kept fix is often minutes old, and without this nothing
+    // re-renders until the first callback lands — so the seconds right after reopening the app,
+    // which is exactly when someone glances at a distance, were the seconds it couldn't admit its
+    // position was stale.
+    if (state.lat == null) state.status = 'locating';
+    emit();
 
     watchId = navigator.geolocation.watchPosition(
       (pos) => {
@@ -223,8 +302,9 @@
   window.Geo = {
     start, stop, snapshot, requestHeading, bindHeading,
     subscribe(fn) { listeners.add(fn); fn(snapshot()); return () => listeners.delete(fn); },
-    distanceFt, bearing, compassName, formatDistance, formatWalk, inBounds,
-    POOR_ACCURACY_FT,
+    distanceFt, bearing, compassName, formatDistance, formatDistanceApprox, formatWalk, inBounds,
+    pinErrorFt, uncertaintyFt,
+    POOR_ACCURACY_FT, PIN_ERROR_FT, FIX_STALE_MS,
 
     /** Distance from the user to a point, or null when we can't honestly say. */
     distanceTo(pt) {

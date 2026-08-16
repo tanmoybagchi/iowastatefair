@@ -53,7 +53,7 @@
             <td><strong>${esc(w.at)}</strong></td>
             <td>${esc(kindLabel[w.kind] || w.kind)}</td>
             <td>${esc(w.detail || '')}</td>
-            ${g.usable ? `<td>${d != null ? esc(Geo.formatDistance(d)) : '—'}</td>` : ''}
+            ${g.usable ? `<td>${d != null ? esc(Geo.formatDistanceApprox(d, Geo.uncertaintyFt(w))) : '—'}</td>` : ''}
           </tr>`;
         }).join('')}
       </table>`;
@@ -76,7 +76,7 @@
       ${gates.map(x => {
         const d = Geo.distanceTo(x);
         return `<tr><td>${esc(x.name)}</td><td>${esc(x.grid || '—')}</td>${
-          g.usable ? `<td>${d != null ? esc(Geo.formatDistance(d)) : '—'}</td>` : ''}</tr>`;
+          g.usable ? `<td>${d != null ? esc(Geo.formatDistanceApprox(d, Geo.uncertaintyFt(x))) : '—'}</td>` : ''}</tr>`;
       }).join('')}
     </table>`;
   }
@@ -87,19 +87,29 @@
   $('phone').textContent = F.meta.phone;
   $('sources').innerHTML = F.meta.sources.map(s => `<li>${esc(s)}</li>`).join('');
 
+  /*
+   * The "typical error" column is rendered from Geo.PIN_ERROR_FT rather than written out here,
+   * because the app now *uses* those same numbers to decide when a distance is too rough to state
+   * as a figure. A table that quoted its own separate numbers would eventually contradict the
+   * screen it's meant to explain.
+   */
   const tiers = [
-    ['edge', 'Corner or side of a mapped building', 'about 15–40 ft'],
-    ['inside', 'Inside or at a mapped building', 'building level'],
-    ['offset', 'Offset out from a mapped building', 'about 60–120 ft'],
-    ['grid', 'From the official printed map grid', 'about 85 ft'],
-    ['none', 'No location published', 'no pin shown'],
+    ['edge', 'Corner or side of a mapped building'],
+    ['inside', 'Inside or at a mapped building'],
+    ['offset', 'Offset out from a mapped building'],
+    ['grid', 'From the official printed map grid'],
+    ['none', 'No location published'],
   ];
+  const tierError = k => {
+    const ft = (Geo.PIN_ERROR_FT || {})[k];
+    return ft == null ? 'no pin shown' : `up to about ${ft} ft`;
+  };
   const counts = {};
   for (const s of F.stands) counts[s.src] = (counts[s.src] || 0) + 1;
   $('accuracy').innerHTML = `
     <tr><th>Method</th><th>What it means</th><th>Typical error</th><th>Stands</th></tr>
-    ${tiers.map(([k, what, err]) =>
-      `<tr><td>${esc(k)}</td><td>${esc(what)}</td><td>${esc(err)}</td><td>${counts[k] || 0}</td></tr>`).join('')}`;
+    ${tiers.map(([k, what]) =>
+      `<tr><td>${esc(k)}</td><td>${esc(what)}</td><td>${esc(tierError(k))}</td><td>${counts[k] || 0}</td></tr>`).join('')}`;
 
   $('counts').textContent =
     `${F.stands.length} stands · ${F.items.length.toLocaleString()} menu items · ` +
