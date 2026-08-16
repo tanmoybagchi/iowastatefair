@@ -507,10 +507,50 @@ function build() {
   const tf = fitTransform(marks);
   const { stands: rawStands, diets } = parseAll();
 
+  /*
+   * Some vendors ARE a building on this map: the Iowa Craft Beer Tent, The Depot, Blue Ribbon Bar &
+   * Eatery. Their published location describes where that venue sits — "Iowa Craft Beer Tent, West
+   * of Jacobson Exhibition Center" — and geocode() only ever reads the prose, so it derived an
+   * offset from a *different* building and put the tent 193 ft from its own footprint. That's a
+   * block, and it's the shape of the one field report we have.
+   *
+   * Where the vendor's name is exactly a landmark we hold a real outline for, that outline wins.
+   * Restricted to marks with a polygon: a grid-only landmark is no better evidence than the prose.
+   */
+  /*
+   * Word spacing is collapsed as well as punctuation, because the vendor report and the printed map
+   * index disagree about it: "JR's SouthPork Ranch" against the landmark "JR’s South Pork Ranch".
+   * norm() keeps the space, so those two are different strings and the match was silently missed.
+   */
+  const venueKey = s => norm(s).replace(/ /g, '');
+  const selfVenues = new Map();
+  for (const m of marks.values()) if (m.poly) selfVenues.set(venueKey(m.name), m);
+
   // --- stands ---
+  const selfFixed = [];
   const stands = rawStands.map((s, i) => {
-    const g = geocode(s.locationRaw, marks, tf, osm.paths);
+    let g = geocode(s.locationRaw, marks, tf, osm.paths);
     if (g.src === 'none') warn('geocode', `${s.vendor} [${s.space}] — ${g.reason}`);
+
+    /*
+     * Only the vaguest tiers are replaced. A named corner of the right building ("West Side of X")
+     * is more specific than that building's centre, so `edge` and an existing `inside` are left
+     * alone — no stand hits that guard today, but a future rebuild shouldn't be able to regress
+     * through it. Matching is on the exact name: "Cattlemen's Beef Quarters - Express" is a
+     * separate window somewhere else and must keep its own pin.
+     */
+    const venue = selfVenues.get(venueKey(s.vendor));
+    if (venue && ['offset', 'grid', 'none'].includes(g.src)) {
+      const c = centroid(venue.poly);
+      selfFixed.push({
+        name: s.vendor,
+        space: s.space,
+        from: `${g.src}/${g.conf || '—'}`,
+        movedFt: g.lat != null ? Math.round(feet(g.lat - c[0], g.lon - c[1])) : null,
+        wasFrom: cleanLoc(s.locationRaw),
+      });
+      g = { lat: c[0], lon: c[1], src: 'inside', conf: 'high', landmark: venue.name, relation: 'self', dir: null };
+    }
     return {
       id: i,
       name: s.vendor,
@@ -531,6 +571,24 @@ function build() {
   for (const s of stands) {
     const z = zoneCheck(s, marks, tf);
     if (z) warn('zone', `${s.name} [${s.space}] geocoded ${z.ft} ft from ${z.zone} zone centre (limit ${z.limit}) via ${s.src}/${s.landmark}`);
+  }
+
+  /*
+   * The remainder: stands named after a landmark we could NOT use, because that landmark is itself
+   * only a grid reference. Reported rather than quietly dropped — JR's SouthPork Ranch is 364 ft
+   * from its own grid square and there is no footprint, road match or photo that would place it
+   * honestly, so it stays approximate and stays visible here.
+   */
+  const selfUnfixable = [];
+  const marksByNorm = new Map();
+  for (const m of marks.values()) marksByNorm.set(venueKey(m.name), m);
+  for (const s of stands) {
+    if (s.lat == null || s.rel === 'self') continue;
+    const m = marksByNorm.get(venueKey(s.name));
+    if (!m || m.poly || !m.grid) continue;
+    const [la, lo] = tf.at(gridCol(m.grid), gridRow(m.grid));
+    const ft = Math.round(feet(s.lat - la, s.lon - lo));
+    if (ft > 60) selfUnfixable.push({ name: s.name, space: s.space, ft, src: s.src, loc: s.loc });
   }
 
   // --- items, deduped by name, each pointing at the stands that sell it ---
@@ -682,7 +740,10 @@ function build() {
     ranked: M.RANKED,
   };
 
-  return { data, tf, geom, stats: { dietExact, dietItemOnly, dietMiss, newMatched, newMissing } };
+  return {
+    data, tf, geom,
+    stats: { dietExact, dietItemOnly, dietMiss, newMatched, newMissing, selfFixed, selfUnfixable },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +768,24 @@ function report({ data, tf, stats }) {
     console.log(`  ${k.padEnd(19)} ${String(by(k)).padStart(4)}  ${pct(by(k))}`);
   }
   console.log(`  menus truncated in source  ${S.filter(s => s.trunc).length}`);
+
+  /*
+   * Every self-venue override, with how far it moved the pin. This is the audit trail: the rule
+   * silently relocating a stand is exactly the kind of change that should have to justify itself in
+   * the report rather than only in a diff of generated coordinates.
+   */
+  console.log('\n=== stands pinned to their own footprint ===');
+  if (!stats.selfFixed.length) console.log('  none');
+  for (const f of stats.selfFixed) {
+    console.log(`  ${f.name} [${f.space}]  moved ${f.movedFt == null ? '(unplaced)' : `${f.movedFt} ft`}` +
+      `  ${f.from} -> inside/high   <- "${f.wasFrom}"`);
+  }
+  if (stats.selfUnfixable.length) {
+    console.log('  still approximate — named after a grid-only landmark, so no footprint to use:');
+    for (const u of stats.selfUnfixable) {
+      console.log(`    ${u.name} [${u.space}]  ${u.ft} ft from its grid square via ${u.src}   <- "${u.loc}"`);
+    }
+  }
 
   console.log('\n=== items ===');
   console.log(`  unique item names   ${data.items.length}`);

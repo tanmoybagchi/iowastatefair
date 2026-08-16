@@ -14,7 +14,7 @@
  * browser re-run install.
  */
 
-const CACHE = 'isf-2026-b8eff923';
+const CACHE = 'isf-2026-fc9e6937';
 
 // Relative URLs so the same worker functions under a subpath (Caddy /fair/, GitHub Pages).
 const ASSETS = [

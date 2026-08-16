@@ -76,10 +76,20 @@ and anything imprecise is labelled **approx. location** in the UI.
 | Method | How | Typical error | Stands |
 |---|---|---|---|
 | `edge` | a compass corner/side of a real OSM footprint | 15–40 ft | 42 |
-| `inside` | explicitly indoors → footprint centroid | building level | 26 |
-| `offset` | "SW of X" → ~35 m out from the footprint edge | 60–120 ft | 88 |
-| `grid` | landmark has no footprint → official map grid via a fitted transform | ~85 ft | 46 |
+| `inside` | explicitly indoors, or the stand *is* a mapped building → footprint centroid | building level | 31 |
+| `offset` | "SW of X" → ~35 m out from the footprint edge | 60–120 ft | 84 |
+| `grid` | landmark has no footprint → official map grid via a fitted transform | ~85 ft | 45 |
 | `none` | the fair's published location is literally "TBD" | no pin | 1 |
+
+**Some vendors *are* a building on the map** — the Iowa Craft Beer Tent, The Depot, Blue Ribbon Bar
+& Eatery. Their published location describes where that venue sits ("Iowa Craft Beer Tent, West of
+Jacobson Exhibition Center"), and reading only the prose derived an offset from a *different*
+building: the Craft Beer Tent landed 193 ft from its own footprint. So when a vendor's name is
+exactly a landmark we hold a real outline for, that outline wins, and the stand records
+`rel: "self"`. It applies only to the vaguest tiers — a named corner of the right building is more
+specific than that building's centre — and only on an exact name match, since
+"Cattlemen's Beef Quarters - Express" is a different window somewhere else. Five stands, 108–193 ft
+each. Every override is printed in the QA report with the distance it moved.
 
 The `grid` tier works by fitting an affine transform from the printed map's grid (rows A–O,
 columns 1–25) to GPS, using landmarks that have **both** a printed grid reference and an OSM
@@ -92,6 +102,12 @@ Two independent cross-checks run on every build:
   `50xxx` Triangle/Riley, `80xxx` Walnut Square…). Each geocoded point is asserted to fall in its
   zone's region — a signal the prose parser can't see. Currently zero mismatches.
 - **Bounds check.** The build fails if any stand lands outside the fairgrounds or at `0,0`.
+
+The report also lists any stand named after a landmark that *couldn't* be pinned to it, so the
+remainder stays visible instead of looking solved. Today that's JR's SouthPork Ranch: the fair's
+own map gives it grid square J13 but OSM has no footprint for it, so there is nothing better to use
+than the prose, and its two rows sit 82 ft and 365 ft from that square. Guessing would be worse
+than labelling it, so it stays `approx`.
 
 "Front of X" is resolved from data rather than assumption: the bearing from the building's centre
 to the nearest *named* road. That gets the Grandstand fronting **south** onto Grand Avenue and the
