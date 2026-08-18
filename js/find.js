@@ -47,6 +47,15 @@
   for (const a of F.amenities) {
     entries.push(Fz.makeEntry({ type: 'amenity', amenity: a }, `${a.name} ${a.kind}`, 1.2));
   }
+  /*
+   * All four words on purpose, and this is what finally makes the restroom/bathroom/toilet/washroom
+   * synonym group in fuzzy.js do anything — it was written before there was any restroom data, so
+   * until now every member of it expanded to words no record contained.
+   */
+  for (const r of F.restrooms) {
+    entries.push(Fz.makeEntry({ type: 'restroom', restroom: r },
+      `restroom bathroom toilet washroom ${r.at || r.near || ''}`, 1.2));
+  }
 
   // ------------------------------------------------------------------ view model
 
@@ -107,6 +116,28 @@
         approx: w.conf !== 'high',
         src: w.src, conf: w.conf,
         tag: paid ? 'for sale' : (w.kind === 'both' ? 'bottle refill' : 'fountain'),
+      };
+    }
+    /*
+     * "at" for the ones inside a building and "near" for the standalone blocks, because that's the
+     * difference in what we actually know: the water map says a building has restrooms without
+     * saying where in it, while OSM gives a standalone block its own footprint but no name, so it
+     * gets described by whatever landmark is nearest. No article, matching the water labels above —
+     * "Restrooms at the Shivers Plaza" is the sort of thing that reads like a machine wrote it.
+     */
+    if (obj.type === 'restroom') {
+      const r = obj.restroom;
+      const sub = r.kind === 'indoor'
+        ? r.detail
+        : `Standalone restroom building${r.changing ? ' · baby change' : ''}`;
+      return {
+        kind: 'restroom',
+        label: r.kind === 'indoor' ? `Restrooms at ${r.at}` : `Restrooms near ${r.near}`,
+        sub,
+        lat: r.lat, lon: r.lon,
+        approx: r.conf !== 'high',
+        src: r.src, conf: r.conf,
+        tag: r.wheelchair ? 'step-free' : '',
       };
     }
     const a = obj.amenity;
@@ -179,6 +210,19 @@
     water: {
       title: 'Water',
       build: () => F.water.map(w => toPlace({ type: 'water', water: w })),
+    },
+    /*
+     * `note` exists because this list is knowingly incomplete and saying so is the difference
+     * between useful and misleading. The fair's map marks about 40 restrooms; we can honestly place
+     * 18 — 8 that OSM has outlined as their own building, and 10 buildings the fair's water map
+     * states have restrooms. Silently showing 18 would walk someone past an unlisted indoor
+     * restroom to a mapped one further away, which is a worse failure than admitting the gap.
+     */
+    restroom: {
+      title: 'Restrooms',
+      note: `Not every restroom — these are the ${F.restrooms.length} we can place from mapped data. `
+        + 'The fair’s own map shows about 40, so check inside a nearby building too.',
+      build: () => F.restrooms.map(r => toPlace({ type: 'restroom', restroom: r })),
     },
     stick: {
       title: 'Food on a stick',
@@ -280,6 +324,10 @@
       : `${places.length} result${places.length === 1 ? '' : 's'}`;
 
     let html = '';
+    // A chip's own caveat about its data comes first: it qualifies the whole list, where the notes
+    // below qualify only the distances.
+    const chipNote = state.mode === 'chip' ? CHIPS[state.chip].note : null;
+    if (chipNote) html += `<p class="note">${escapeHtml(chipNote)}</p>`;
     if (state.partial) {
       html += `<p class="note">No exact match — showing the closest things we could find.</p>`;
     }

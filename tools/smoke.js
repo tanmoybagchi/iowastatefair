@@ -303,6 +303,47 @@ async function run() {
       water.length >= 2 && water.every(w => w.ft != null) && water[0].ft <= water[1].ft,
       water.map(w => `${w.name} "${w.dist}" (${w.ft} ft)`).join(' | '));
 
+    // Flow 3a — restroom chip. Same distance-not-labels rule as the water check above.
+    await evaluate(`document.querySelector('.chip[data-chip="restroom"]').click()`);
+    await sleep(400);
+    const loos = await evaluate(`(() => {
+      const label = r => r.kind === 'indoor' ? 'Restrooms at ' + r.at : 'Restrooms near ' + r.near;
+      const byLabel = new Map(window.FAIR.restrooms.map(r => [label(r), r]));
+      return {
+        note: (document.querySelector('#sheet-body .note') || {}).textContent || null,
+        rows: [...document.querySelectorAll('#sheet-body .result')].slice(0, 3).map(el => {
+          const name = el.querySelector('.name').textContent.trim();
+          const rec = byLabel.get(name);
+          return { name, ft: rec ? Math.round(window.Geo.distanceTo(rec)) : null }; }),
+      }; })()`);
+    check('flow: restroom chip lists nearest first',
+      loos.rows.length >= 2 && loos.rows.every(r => r.ft != null) && loos.rows[0].ft <= loos.rows[1].ft,
+      loos.rows.map(r => `${r.name} (${r.ft} ft)`).join(' | '));
+    /*
+     * The coverage caveat is a check rather than a comment because it is the feature. We can place 18
+     * of ~40 restrooms, and a list that shows 18 without saying so will walk someone past an unlisted
+     * indoor one. If this note ever stops rendering, the chip becomes quietly misleading.
+     */
+    check('flow: restroom chip discloses that it is incomplete',
+      !!loos.note && /not every restroom/i.test(loos.note) && /about 40/.test(loos.note),
+      loos.note);
+    await shot('03-restrooms');
+
+    // Flow 3a2 — "bathroom" reaches restrooms through the fuzzy synonym group.
+    await evaluate(`(() => { const q=document.getElementById('q'); q.value='bathroom';
+      q.dispatchEvent(new Event('input',{bubbles:true})); })()`);
+    await sleep(450);
+    const bath = await evaluate(`(() => {
+      const r = document.querySelector('#sheet-body .result');
+      return r ? r.querySelector('.name').textContent.trim() : null; })()`);
+    check('flow: "bathroom" finds a restroom via the synonym group',
+      !!bath && /^Restrooms /.test(bath), bath || 'no result');
+
+    // Back to the water chip: the two checks below document their starting state as "a chip is
+    // active and its list is open", so hand them that rather than a search.
+    await evaluate(`document.querySelector('.chip[data-chip="water"]').click()`);
+    await sleep(400);
+
     // Flow 3b — the close button actually closes, and stays closed across a GPS tick.
     //
     // Regression: renderList() used to end in openSheet(), and the geolocation subscriber calls

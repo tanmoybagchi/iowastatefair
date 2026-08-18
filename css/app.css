@@ -23,6 +23,7 @@
   --accent: #0b6ea8;         /* water / info blue */
   --go: #1c7a44;             /* directions green */
   --warn: #a05a00;
+  --restroom: #6b3fa0;       /* restroom violet — the blue you'd expect is already water's */
 
   /* Map surfaces. Pushed toward more separation than looks necessary indoors — on a phone in
      direct sun, low-contrast greys and greens collapse into one flat wash. */
@@ -189,6 +190,8 @@ a { color: var(--accent); }
 .pin-water .pin-dot { fill: var(--accent); }
 .pin-water .pin-approx { stroke: var(--accent); }
 .pin-amenity .pin-dot { fill: var(--warn); }
+.pin-restroom .pin-dot { fill: var(--restroom); }
+.pin-restroom .pin-approx { stroke: var(--restroom); }
 .pin-landmark .pin-dot { fill: #55606f; }
 .pin.is-selected .pin-dot { fill: var(--go); r: 34; stroke-width: 10; }
 .pin { cursor: pointer; }
@@ -570,6 +573,7 @@ dl.kv dd { margin: 2px 0 0; color: var(--ink-soft); }
     --brand: #d8404e;
     --go: #35a869;
     --accent: #3f9bd4;
+    --restroom: #a884d8;
   }
   .bldg-label { stroke: rgba(0, 0, 0, .75); stroke-width: 16; fill: #e6ecf4; }
   .me-dot { fill: #4b9cff; }

@@ -38,6 +38,7 @@ and enter `41.5952, -93.5510` (the Agriculture Building, next to the Butter Cow)
 | **2,037 menu items** | searchable, typo-tolerant |
 | **78 new-for-2026 foods** | with the official People's Choice finalists #1–3 and semi-finalists #4–11 |
 | **22 water points** | the official fountain / bottle-refill list, with in-building detail |
+| **18 restrooms** | of about 40 — see *Known gaps*; 5 tagged step-free |
 | **Dietary flags** | vegan, vegetarian, gluten-friendly, dairy-free — from the fair's own lists |
 | **138 landmarks** | buildings, gates, stages, plazas |
 | **117 building footprints** | real geometry, from OpenStreetMap |
@@ -124,6 +125,14 @@ Varied Industries Building fronting **north** onto the same road, with no specia
   matters because the GPS watch is dropped while the app is off screen. This came from a field
   report of the app "saying I was there" a block early; that symptom is what a kept-but-stale fix,
   a 150 ft grid pin, or both at once look like from the outside.
+- **The restroom list is 18 of about 40, and the app says so on the chip.** The fair's map marks
+  every restroom with an icon, but only an icon — there is no list and no coordinates, and reading
+  ~40 positions off the artwork by eye would manufacture precision we don't have. So restrooms come
+  from the two places that can be sourced: 8 that OpenStreetMap has outlined as their own building
+  (a real footprint, so a real point), and 10 buildings the fair's water-refill map states have
+  restrooms, pinned at the building like the water points and labelled "at" rather than pointing at
+  a door. A silently 45%-complete restroom finder is worse than an openly incomplete one, so the
+  chip carries the count and tells you to check inside a nearby building too.
 - The fair's vendor list **truncates 49 menus mid-item** at a column break. Those stands are
   flagged in the app and a few of their items may be missing. Truncated text is carried through
   as-is rather than guessed at.

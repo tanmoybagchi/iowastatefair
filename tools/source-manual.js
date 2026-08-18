@@ -386,6 +386,36 @@ const WATER = [
 ];
 
 // ---------------------------------------------------------------------------
+// Restrooms inside buildings.  Source: [WATER], read for what it says about restrooms.
+//
+// The fair's map marks ~40 restrooms with an icon, and those icon positions are NOT transcribed
+// here for the reason given at the amenity legend below. But the water map's in-building detail
+// names the building each fountain sits in *relative to its restrooms* — "between the restrooms",
+// "by each restroom on north and south ends" — which is the fair's own document stating that this
+// building has restrooms. That's evidence for the building, not for a point inside it, so these
+// land on the footprint centroid like the water points do, and the UI says "in the <building>".
+//
+// `detail` is written from the restroom's point of view. Reusing the water strings verbatim reads
+// backwards on a restroom row: "Right side of men's restrooms" describes where the *fountain* is.
+//
+// This list is 10 buildings; with the 8 OSM-surveyed standalone restrooms the build adds, the app
+// holds 18 of ~40. Deliberately incomplete, and the chip says so.
+// ---------------------------------------------------------------------------
+
+const RESTROOMS = [
+  { landmark: '4-H Exhibits Building', detail: 'Inside the main area, and off the lobby' },
+  { landmark: 'Animal Learning Center', detail: 'Inside the building' },
+  { landmark: 'Cultural Center', detail: 'North and south ends, all three floors; family restrooms' },
+  { landmark: 'Food Center', detail: 'Inside the Elwell Family Food Center' },
+  { landmark: 'Grandstand', detail: 'One on each side, plus the upstairs mezzanine' },
+  { landmark: 'Jacobson Exhibition Center', detail: 'North and south ends of the building' },
+  { landmark: 'Service Center', detail: 'Inside the Service Center' },
+  { landmark: 'Sheep Barn', detail: 'Northeast and northwest sides — the new restrooms' },
+  { landmark: 'Shivers Plaza', detail: 'Men’s and women’s, at the plaza' },
+  { landmark: 'Varied Industries Building', detail: 'South hallway, and upstairs' },
+];
+
+// ---------------------------------------------------------------------------
 // New foods.  Source: [NEW].
 //
 // RANKED holds the People's Choice finalists (1–3) and semi-finalists (4–11) with the
@@ -504,4 +534,6 @@ const AMENITIES = [
   { kind: 'shade', name: 'Legacy Terrace', landmark: 'Legacy Terrace', detail: 'Benches, water feature, flag display' },
 ];
 
-module.exports = { FAIR, LANDMARK_GRID, ALIASES, WATER, RANKED, NEW_ITEMS, AMENITIES };
+module.exports = {
+  FAIR, LANDMARK_GRID, ALIASES, WATER, RESTROOMS, RANKED, NEW_ITEMS, AMENITIES,
+};

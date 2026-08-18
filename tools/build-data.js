@@ -63,7 +63,7 @@ function loadOsm() {
   const inBounds = (la, lo) =>
     la >= BOUNDS.minLat && la <= BOUNDS.maxLat && lo >= BOUNDS.minLon && lo <= BOUNDS.maxLon;
 
-  const buildings = [], paths = [], areas = [];
+  const buildings = [], paths = [], areas = [], toilets = [];
   for (const el of raw.elements) {
     if (el.type !== 'way' || !el.geometry) continue;
     const pts = el.geometry.filter(p => p && p.lat != null).map(p => [p.lat, p.lon]);
@@ -75,8 +75,38 @@ function loadOsm() {
     if (t.building) buildings.push(rec);
     else if (t.highway) paths.push({ ...rec, kind: t.highway });
     else if (t.leisure || t.landuse) areas.push({ ...rec, kind: t.leisure || t.landuse });
+    /*
+     * Restroom blocks are also buildings, so they stay in `buildings` and keep being drawn on the
+     * map. This is a second reference to the same way, kept because the restroom list needs the
+     * accessibility tags and `buildings` deliberately carries nothing but a name and an outline.
+     */
+    if (t.amenity === 'toilets') {
+      toilets.push({ pts, wheelchair: t.wheelchair === 'yes', changing: t.changing_table === 'yes' });
+    }
   }
-  return { buildings, paths, areas };
+
+  /*
+   * osm.json is the centres-and-tags companion file (see fetch-osm.sh); the only thing taken from
+   * it is restrooms mapped as a bare node rather than an outlined building — currently one, by the
+   * MidAmerican Energy Stage. Optional on purpose: geom.json is the file this build genuinely needs,
+   * and a missing companion should cost one restroom, not the whole run.
+   */
+  const nodeFile = path.join(ROOT, '_source', 'osm', 'osm.json');
+  if (fs.existsSync(nodeFile)) {
+    for (const el of JSON.parse(fs.readFileSync(nodeFile, 'utf8')).elements) {
+      if (el.type !== 'node' || !el.tags || el.tags.amenity !== 'toilets') continue;
+      if (!inBounds(el.lat, el.lon)) continue;
+      toilets.push({
+        pts: [[el.lat, el.lon]],
+        wheelchair: el.tags.wheelchair === 'yes',
+        changing: el.tags.changing_table === 'yes',
+      });
+    }
+  } else {
+    warn('osm', 'no _source/osm/osm.json — restrooms mapped as a plain node are missing');
+  }
+
+  return { buildings, paths, areas, toilets };
 }
 
 /** Area-weighted centroid of a closed ring, falling back to the mean vertex. */
@@ -93,6 +123,18 @@ function centroid(pts) {
   }
   a *= 0.5;
   return [cy / (6 * a), cx / (6 * a)];
+}
+
+/*
+ * Distance in feet. Equirectangular rather than haversine: over a 3,000 ft fairground the error is
+ * far under a foot, and this is only ever used to pick and describe a nearby landmark.
+ */
+function distFt(lat1, lon1, lat2, lon2) {
+  const R = 20902231;                                     // earth radius in feet
+  const p = Math.PI / 180;
+  const y = (lat2 - lat1) * p * R;
+  const x = (lon2 - lon1) * p * R * Math.cos(((lat1 + lat2) / 2) * p);
+  return Math.hypot(x, y);
 }
 
 function bbox(pts) {
@@ -704,6 +746,46 @@ function build() {
     return { name: m.name, grid: m.grid || null, ...p, conf: m.osmCentre ? 'high' : m.gridEst ? 'low' : 'medium' };
   }).filter(l => l.lat != null);
 
+  /*
+   * --- restrooms, from two sources with different shapes of evidence ---
+   *
+   * `building`  a standalone block OSM has an outlined footprint for. Small enough that its
+   *             centroid is a real point, so this is the best tier here.
+   * `indoor`    the fair's water map says this building has restrooms, but not where in it. Pinned
+   *             at the footprint centroid exactly like the water points, and labelled "in the X"
+   *             rather than pointing at a door we can't see.
+   *
+   * 18 between them against ~40 on the fair's map, which the chip discloses rather than papering
+   * over. See the RESTROOMS comment in source-manual.js for why the map icons stay untranscribed.
+   */
+  const restrooms = [];
+  for (const t of osm.toilets) {
+    const [la, lo] = centroid(t.pts);
+    /*
+     * Describe it by the nearest landmark, plainly. A grid-derived landmark is a perfectly good
+     * *name* even though it's a poor pin — nothing here derives a coordinate from it, the restroom's
+     * own footprint does that. Preferring high-confidence marks instead pushed one restroom's label
+     * from "near the MidAmerican Energy Stage" (39 ft) to "near the Wind Turbine & Education Center"
+     * (276 ft), which is worse writing about an equally exact point. Confidence only breaks ties.
+     */
+    const near = landmarks
+      .map(l => ({ name: l.name, ft: distFt(la, lo, l.lat, l.lon), high: l.conf === 'high' }))
+      .sort((a, b) => (a.ft - b.ft) || (b.high - a.high))[0] || null;
+    restrooms.push({
+      kind: 'building',
+      near: near ? near.name : null,
+      nearFt: near ? Math.round(near.ft) : null,
+      wheelchair: t.wheelchair || undefined,
+      changing: t.changing || undefined,
+      lat: r6(la), lon: r6(lo), src: 'inside', conf: 'high',
+    });
+  }
+  for (const r of M.RESTROOMS) {
+    const p = place(r.landmark);
+    if (!p) warn('restroom', `cannot place restrooms at ${r.landmark}`);
+    restrooms.push({ kind: 'indoor', at: r.landmark, detail: r.detail, ...(p || { lat: null, lon: null, src: 'none' }) });
+  }
+
   // --- geometry, thinned for the SVG map ---
   const geom = {
     buildings: osm.buildings.map(b => ({ n: b.name || undefined, p: b.pts.map(([a, o]) => [r5(a), r5(o)]) })),
@@ -736,6 +818,7 @@ function build() {
     items: [...itemsByName.values()],
     landmarks,
     water,
+    restrooms,
     amenities,
     ranked: M.RANKED,
   };
@@ -797,8 +880,22 @@ function report({ data, tf, stats }) {
 
   console.log('\n=== other ===');
   console.log(`  landmarks           ${data.landmarks.length}`);
-  console.log(`  water points        ${data.water.filter(w => w.lat != null).length}/${data.water.length}`);
-  console.log(`  amenities           ${data.amenities.filter(a => a.lat != null).length}/${data.amenities.length}`);
+  const R = data.restrooms;
+  const rBy = k => R.filter(r => r.kind === k && r.lat != null).length;
+  console.log(`  restrooms           ${R.filter(r => r.lat != null).length}/${R.length}` +
+    ` (${rBy('building')} standalone OSM buildings, ${rBy('indoor')} in-building from the water map)`);
+  console.log(`    of ~40 on the fair's map — the rest are icon positions we won't guess at`);
+  console.log(`    step-free                ${R.filter(r => r.wheelchair).length} tagged wheelchair-accessible in OSM`);
+  /*
+   * A standalone restroom is described by the nearest landmark, so a far one is a weak label — the
+   * point is right, the words for it are vague. Printed rather than fixed: there is nothing nearer
+   * to name, and hiding it would make the list look better than it is.
+   */
+  const far = R.filter(r => r.kind === 'building' && r.nearFt != null && r.nearFt > 300);
+  if (far.length) {
+    console.log(`    loosely described        ${far.length} standalone restroom(s) with no landmark inside 300 ft:`);
+    for (const r of far) console.log(`      near ${r.near} — ${r.nearFt} ft away`);
+  }
 
   const cats = {};
   for (const w of warnings) cats[w.cat] = (cats[w.cat] || 0) + 1;
