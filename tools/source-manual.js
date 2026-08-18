@@ -386,6 +386,37 @@ const WATER = [
 ];
 
 // ---------------------------------------------------------------------------
+// Landmarks that are things *inside* another landmark.
+//
+// These have no footprint of their own and were falling back to the printed grid — ~150 ft, and
+// for most of them the grid square was estimated off the artwork rather than read from the index.
+// But we know something better than a guessed square: we know which building they are in, and we
+// have that building's real OSM outline. So they take the parent's footprint and become `inside`
+// (100 ft, "building level") instead of `grid`.
+//
+// Every entry needs evidence, and the evidence is named below. Candidates rejected for lack of it:
+// Soda Fountain (no source says which building), Horse Annex (an annex is next to the Horse Barn,
+// not in it — its grid square lands 274 ft outside), and Avenue of Breeds, which is an outdoor
+// livestock avenue 1,245 ft from the Cattle Barn. A wrong parent is far worse than a vague grid
+// pin, so those three keep their grid fallback.
+//
+// These are deliberately barred from the grid->GPS transform fit (see fitTransform): their grid
+// square describes a spot inside a large building rather than the building itself, which is exactly
+// the mismatched-anchor case that drags the whole fit.
+// ---------------------------------------------------------------------------
+
+const INSIDE = {
+  // [MAP] legend text: "World-famous Butter Cow, in the John Deere Agriculture Building".
+  // Its estimated square sits 135 ft outside the footprint, but an estimated square is the
+  // unreliable half of that comparison, not the fair's own sentence.
+  'Butter Cow': 'Agriculture Building',
+  'Big Boar': 'Swine Barn',          // [MAP] legend: "In the Swine Barn"; square lands inside it
+  'Big Ram': 'Sheep Barn',           // [MAP] legend: "In the Sheep Barn"; square lands inside it
+  'Milking Parlor': 'Cattle Barn',   // printed square L16 lands inside the Cattle Barn footprint
+  'Sale Ring': 'Cattle Barn',        // printed square L16 lands inside the Cattle Barn footprint
+};
+
+// ---------------------------------------------------------------------------
 // Restrooms inside buildings.  Source: [WATER], read for what it says about restrooms.
 //
 // The fair's map marks ~40 restrooms with an icon, and those icon positions are NOT transcribed
@@ -535,5 +566,5 @@ const AMENITIES = [
 ];
 
 module.exports = {
-  FAIR, LANDMARK_GRID, ALIASES, WATER, RESTROOMS, RANKED, NEW_ITEMS, AMENITIES,
+  FAIR, LANDMARK_GRID, ALIASES, INSIDE, WATER, RESTROOMS, RANKED, NEW_ITEMS, AMENITIES,
 };

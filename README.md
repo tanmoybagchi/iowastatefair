@@ -76,10 +76,10 @@ and anything imprecise is labelled **approx. location** in the UI.
 
 | Method | How | Typical error | Stands |
 |---|---|---|---|
-| `edge` | a compass corner/side of a real OSM footprint | 15–40 ft | 42 |
+| `edge` | a compass corner/side of a real OSM footprint | 15–40 ft | 43 |
 | `inside` | explicitly indoors, or the stand *is* a mapped building → footprint centroid | building level | 31 |
 | `offset` | "SW of X" → ~35 m out from the footprint edge | 60–120 ft | 84 |
-| `grid` | landmark has no footprint → official map grid via a fitted transform | ~85 ft | 45 |
+| `grid` | landmark has no footprint → official map grid via a fitted transform | ~85 ft | 44 |
 | `none` | the fair's published location is literally "TBD" | no pin | 1 |
 
 **Some vendors *are* a building on the map** — the Iowa Craft Beer Tent, The Depot, Blue Ribbon Bar
@@ -91,6 +91,26 @@ exactly a landmark we hold a real outline for, that outline wins, and the stand 
 specific than that building's centre — and only on an exact name match, since
 "Cattlemen's Beef Quarters - Express" is a different window somewhere else. Five stands, 108–193 ft
 each. Every override is printed in the QA report with the distance it moved.
+
+**Some landmarks are a thing *inside* a building** — the Butter Cow, the Big Boar, the Big Ram, the
+Sale Ring, the Milking Parlor. They have no outline of their own and were falling back to the printed
+grid, in most cases a square estimated off the artwork rather than read from the index. But we know
+something better than a guessed square: *which building they are in*, and we hold that building's real
+outline. So each takes its parent's footprint and becomes `inside` (~100 ft, "building level") instead
+of `grid` (~150 ft when estimated) — and the pin stops being a guess. `tools/source-manual.js` records
+the parent and the evidence for it; the UI says "In the Agriculture Building" rather than implying the
+Cow has a surveyed point of its own.
+
+Three candidates were **rejected for lack of evidence**, because a wrong parent is much worse than a
+vague grid pin: Soda Fountain (no source names its building), Horse Annex (an annex is *beside* the
+Horse Barn — its square lands 274 ft outside it), and Avenue of Breeds, an outdoor livestock avenue
+1,245 ft from the Cattle Barn. Those keep their grid fallback.
+
+These landmarks are also **barred from the transform fit below**. Their grid square describes a spot
+inside a large building rather than the building itself, so pairing it with that building's centroid
+would add a second, conflicting anchor for one building — exactly the mismatch the outlier trim exists
+to catch, and better excluded than relied upon to be trimmed. Anchor count and the 82 ft mean error are
+unchanged by this rule, which is the check that it worked.
 
 The `grid` tier works by fitting an affine transform from the printed map's grid (rows A–O,
 columns 1–25) to GPS, using landmarks that have **both** a printed grid reference and an OSM

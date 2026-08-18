@@ -234,6 +234,22 @@ function buildLandmarks(osm) {
     });
   }
 
+  /*
+   * Adopt the parent's footprint for landmarks that are a thing inside another landmark (M.INSIDE).
+   * A second pass, because a parent may be defined after its child in the name set.
+   *
+   * `insideOf` is recorded rather than just silently copying the outline: fitTransform must be able
+   * to exclude these, and the QA report should be able to show what was upgraded and from where.
+   */
+  for (const [child, parent] of Object.entries(M.INSIDE)) {
+    const c = marks.get(child), p = marks.get(parent);
+    if (!c) { warn('inside', `${child} is not a known landmark`); continue; }
+    if (!p || !p.osmCentre) { warn('inside', `${parent} has no footprint, so ${child} keeps its grid pin`); continue; }
+    c.poly = p.poly;
+    c.osmCentre = p.osmCentre;
+    c.insideOf = parent;
+  }
+
   // Any named OSM building not already covered becomes a landmark too — useful for the map
   // and for "near X" lookups even if no vendor references it.
   for (const [osmName, b] of byOsmName) {
@@ -252,9 +268,14 @@ function buildLandmarks(osm) {
  * Least squares on   value = p0 + p1*col + p2*row   using every landmark that has BOTH a
  * printed grid ref and an OSM footprint. Landmarks whose grid cell was estimated off the
  * artwork are excluded from the fit so they can't drag it.
+ *
+ * So are landmarks that borrowed a parent's footprint (M.INSIDE): the Sale Ring's printed square
+ * describes a spot inside the Cattle Barn, so pairing it with the Cattle Barn's centroid would add
+ * a second, conflicting anchor for one building — the mismatched-anchor case the trim pass below
+ * exists to catch. Better to never let it in than to rely on being trimmed back out.
  */
 function fitTransform(marks) {
-  const all = [...marks.values()].filter(m => m.grid && m.osmCentre && !m.gridEst);
+  const all = [...marks.values()].filter(m => m.grid && m.osmCentre && !m.gridEst && !m.insideOf);
   let anchors = all;
   let X = anchors.map(m => [1, gridCol(m.grid), gridRow(m.grid)]);
 
@@ -743,7 +764,13 @@ function build() {
     const p = m.osmCentre ? { lat: r6(m.osmCentre[0]), lon: r6(m.osmCentre[1]), src: 'inside' }
       : m.grid ? (([la, lo]) => ({ lat: r6(la), lon: r6(lo), src: 'grid' }))(tf.at(gridCol(m.grid), gridRow(m.grid)))
       : { lat: null, lon: null, src: 'none' };
-    return { name: m.name, grid: m.grid || null, ...p, conf: m.osmCentre ? 'high' : m.gridEst ? 'low' : 'medium' };
+    return {
+      name: m.name, grid: m.grid || null, ...p,
+      conf: m.osmCentre ? 'high' : m.gridEst ? 'low' : 'medium',
+      // Carried so the UI can say "in the Agriculture Building" rather than implying the Butter Cow
+      // has a surveyed point of its own.
+      in: m.insideOf || undefined,
+    };
   }).filter(l => l.lat != null);
 
   /*
@@ -880,6 +907,14 @@ function report({ data, tf, stats }) {
 
   console.log('\n=== other ===');
   console.log(`  landmarks           ${data.landmarks.length}`);
+  const insiders = data.landmarks.filter(l => l.in);
+  if (insiders.length) {
+    console.log(`    took a parent's footprint  ${insiders.length} (grid ~150 ft -> inside ~100 ft, and no longer a guess):`);
+    for (const l of insiders) console.log(`      ${l.name} -> in the ${l.in}`);
+  }
+  console.log(`  water points        ${data.water.filter(w => w.lat != null).length}/${data.water.length}`);
+  console.log(`  amenities           ${data.amenities.filter(a => a.lat != null).length}/${data.amenities.length}`);
+
   const R = data.restrooms;
   const rBy = k => R.filter(r => r.kind === k && r.lat != null).length;
   console.log(`  restrooms           ${R.filter(r => r.lat != null).length}/${R.length}` +

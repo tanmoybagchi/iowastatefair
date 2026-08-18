@@ -101,7 +101,10 @@
     if (obj.type === 'landmark') {
       const l = obj.landmark;
       return {
-        kind: 'landmark', label: l.name, sub: l.grid ? `Map grid ${l.grid}` : 'Fairgrounds',
+        kind: 'landmark', label: l.name,
+        // Where it is beats which grid square it's in. "In the Agriculture Building" is also the
+        // honest description of this pin: it's that building's centroid, not a point for the Cow.
+        sub: l.in ? `In the ${l.in}` : l.grid ? `Map grid ${l.grid}` : 'Fairgrounds',
         lat: l.lat, lon: l.lon, approx: l.conf !== 'high', src: l.src, conf: l.conf,
       };
     }
