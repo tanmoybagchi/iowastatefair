@@ -137,6 +137,11 @@ Varied Industries Building fronting **north** onto the same road, with no specia
 ### Known gaps, stated plainly
 
 - Pins point to the right building, corner or concourse — **not to an exact serving window.**
+- **Lists lead with a walking time, and it is not a route.** It's the straight-line distance divided
+  by a deliberately slow pace (`WALK_FT_PER_SEC`, `js/geo.js`), so it ignores buildings, fences and
+  crowds — the app draws a straight line and never claims to route you. The slow pace offsets some of
+  that, but not reliably, so the distance it was derived from stays on screen underneath it and the
+  Info screen states what the number is. Inside the combined uncertainty no time is shown at all.
 - **A displayed distance carries both errors, and says so.** Each pin's tier implies a radius
   (`js/geo.js`, `PIN_ERROR_FT`) which is combined in quadrature with the phone's own reported
   accuracy. Once you are closer than the two together, the app stops quoting a figure and says

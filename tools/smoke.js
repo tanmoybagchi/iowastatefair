@@ -329,6 +329,23 @@ async function run() {
       loos.note);
     await shot('03-restrooms');
 
+    /*
+     * The list leads with a walking time and carries the distance underneath. Asserted because the
+     * two live in the same <div> and a refactor could swap them back without anything else noticing
+     * — and the pair reads plausibly either way round, which is exactly why a human wouldn't catch
+     * it. Reads the first row far enough down the list to be outside its own uncertainty; rows
+     * inside it deliberately show "within about n ft" and no time at all.
+     */
+    const pair = await evaluate(`(() => {
+      const el = [...document.querySelectorAll('#sheet-body .result')]
+        .map(r => r.querySelector('.dist')).find(d => d && !d.classList.contains('rough'));
+      if (!el) return null;
+      return { big: el.querySelector('b').textContent.trim(),
+               small: (el.querySelector('b + span') || {}).textContent || null }; })()`);
+    check('list: leads with a walk time and shows the distance under it',
+      !!pair && /^(<1|\d+) min walk$/.test(pair.big) && /^\d+(\.\d+)? (ft|mi)$/.test(pair.small),
+      pair ? `"${pair.big}" over "${pair.small}"` : 'no non-rough row found');
+
     // Flow 3a2 — "bathroom" reaches restrooms through the fuzzy synonym group.
     await evaluate(`(() => { const q=document.getElementById('q'); q.value='bathroom';
       q.dispatchEvent(new Event('input',{bubbles:true})); })()`);

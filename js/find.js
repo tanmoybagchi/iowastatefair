@@ -251,16 +251,26 @@
   // ------------------------------------------------------------------ rendering
 
   /*
-   * The distance column. Inside the combined pin + GPS uncertainty it says so rather than printing
-   * a figure: a walk time under a slop of 150 ft is two claims where we can't honestly make one.
+   * The right-hand column: walking time on top, the distance it came from underneath.
+   *
+   * Time leads because it's what you actually decide on — "4 min" answers "do I go now?" in a way
+   * that "750 ft" doesn't. The distance stays visible rather than being dropped, because it's the
+   * checkable half of the pair: the time is a straight line divided by an assumed pace, so if it
+   * ever looks wrong the figure it was derived from is right there.
+   *
+   * Inside the combined pin + GPS uncertainty, neither is printed — the slot keeps saying "within
+   * about 150 ft" as it did before. A time is the worse of the two claims to make at that range,
+   * since it reads as a routed estimate of a walk we can't even establish the direction of.
    */
   function distanceBits(place) {
     const d = Geo.distanceTo(place);
     if (d == null) return '';
     const unc = Geo.uncertaintyFt(place);
     const rough = unc != null && d <= unc;
-    return `<div class="dist${rough ? ' rough' : ''}"><b>${Geo.formatDistanceApprox(d, unc)}</b>${
-      rough ? '' : `<span>${Geo.formatWalk(d)}</span>`}</div>`;
+    if (rough) return `<div class="dist rough"><b>${Geo.formatDistanceApprox(d, unc)}</b></div>`;
+    // The screen-reader word: on its own "4 min" alongside "750 ft" doesn't say what either is.
+    return `<div class="dist"><b>${Geo.formatWalkShort(d)}<span class="sr-only"> walk</span></b>`
+      + `<span>${Geo.formatDistance(d)}</span></div>`;
   }
 
   function badgesFor(place) {
@@ -451,8 +461,8 @@
       live = `<div class="dir-live">
         <div class="arrow" id="arrow" style="transform:rotate(${(rel != null ? rel : 0).toFixed(0)}deg)" aria-hidden="true">↑</div>
         <div>
-          <div class="big">${Geo.formatDistanceApprox(d, unc)}</div>
-          <div class="small">${Geo.formatWalk(d)} · head ${Geo.compassName(brg)}${rel != null ? '' : ' (compass off)'}</div>
+          <div class="big">${Geo.formatWalk(d)}</div>
+          <div class="small">${Geo.formatDistance(d)} · head ${Geo.compassName(brg)}${rel != null ? '' : ' (compass off)'}</div>
         </div>
       </div>`;
     } else {

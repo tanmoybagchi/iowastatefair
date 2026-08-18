@@ -164,6 +164,21 @@
     return `${Math.round(mins)} min walk`;
   }
 
+  /**
+   * The same number with the words stripped, for the right-hand column of a list row where
+   * "under a minute" would wrap and "2 min walk" would set the column width for everything.
+   *
+   * Note what this figure is and isn't: WALK_FT_PER_SEC applied to a straight line. It is not a
+   * route — nothing here knows about buildings, fences or the crowd outside the Butter Cow — so it
+   * is the time the walk would take if you could walk through them. The pace is deliberately slow
+   * enough that the two errors partly offset, but only partly, and the Info screen says so.
+   */
+  function formatWalkShort(ft) {
+    if (ft == null) return '';
+    const mins = ft / WALK_FT_PER_SEC / 60;
+    return mins < 1 ? '<1 min' : `${Math.round(mins)} min`;
+  }
+
   // ---------------------------------------------------------------- watching
 
   let watchId = null;
@@ -302,7 +317,8 @@
   window.Geo = {
     start, stop, snapshot, requestHeading, bindHeading,
     subscribe(fn) { listeners.add(fn); fn(snapshot()); return () => listeners.delete(fn); },
-    distanceFt, bearing, compassName, formatDistance, formatDistanceApprox, formatWalk, inBounds,
+    distanceFt, bearing, compassName, formatDistance, formatDistanceApprox, formatWalk,
+    formatWalkShort, inBounds,
     pinErrorFt, uncertaintyFt,
     POOR_ACCURACY_FT, PIN_ERROR_FT, FIX_STALE_MS,
 

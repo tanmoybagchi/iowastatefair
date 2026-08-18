@@ -46,7 +46,8 @@
     if (!stand || stand.lat == null) return '';
     const d = Geo.distanceTo(stand);
     if (d == null) return '';
-    return ` · ${Geo.formatDistance(d)} (${Geo.formatWalk(d)})`;
+    // Time first, distance in the brackets — matching the Find screen, which leads with the walk.
+    return ` · ${Geo.formatWalk(d)} (${Geo.formatDistance(d)})`;
   }
 
   function dietBadges(item) {
