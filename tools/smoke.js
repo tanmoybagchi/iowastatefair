@@ -404,6 +404,10 @@ async function run() {
     check('wake: screen held once directions are open',
       (await evaluate(`!!(window.Wake && window.Wake.wanted)`)) === true);
 
+    // Expand first: "Back to list" now lives in the collapsed-away half of the panel, and clicking
+    // a display:none button would still fire — passing without proving a user could reach it.
+    await evaluate(`document.getElementById('sheet-toggle').click()`);
+    await sleep(250);
     await evaluate(`document.getElementById('back').click()`);
     await sleep(300);
     check('wake: screen released on going back to the list',
@@ -412,19 +416,98 @@ async function run() {
     // Flow 4 — open directions
     await evaluate(`document.querySelector('#sheet-body .result').click()`);
     await sleep(400);
+    /*
+     * `shown` rather than merely present: everything below is queried out of a panel whose lower
+     * half is display:none while collapsed, and textContent/getAttribute both work fine on a hidden
+     * node. Without a visibility test these checks would pass on markup no user could see.
+     */
     const dir = await evaluate(`(() => {
+      const shown = el => !!(el && el.offsetParent !== null);
       const big=document.querySelector('#sheet-body .dir-live .big');
       const small=document.querySelector('#sheet-body .dir-live .small');
       const maps=document.querySelector('#sheet-body a.btn.primary');
       const line=document.querySelectorAll('#map .route-line').length;
       return { big: big?big.textContent.trim():null, small: small?small.textContent.trim():null,
+               liveShown: shown(big), mapsShown: shown(maps),
+               peek: document.getElementById('sheet').classList.contains('peek'),
                maps: maps?maps.getAttribute('href'):null, line }; })()`);
     check('flow: directions show live distance + heading', !!dir.big && !!dir.small,
       `${dir.big} — ${dir.small}`);
     check('flow: straight line drawn to target', dir.line === 1);
+
+    /*
+     * Tapping a result lands in the collapsed peek, so the map is what you get — but the arrow, the
+     * time and the heading have to survive the collapse or there is nothing to walk by.
+     */
+    check('sheet: tapping a result collapses to a peek, keeping the live line visible',
+      dir.peek === true && dir.liveShown === true,
+      `peek=${dir.peek} liveVisible=${dir.liveShown}`);
+    check('sheet: the detail half is hidden while collapsed', dir.mapsShown === false);
     await shot('02-directions');
+
+    /*
+     * The regression guard, and the reason state.sheet exists rather than a renderer deciding.
+     * renderDirections() runs on every geolocation fix; when it ended in openSheet() a collapsed
+     * panel sprang back open on the next tick, which is indistinguishable from a broken grip.
+     * Asserted after a real position update — checking immediately would pass with the bug present.
+     */
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: FAIR_LAT + 0.0002, longitude: FAIR_LON + 0.0002, accuracy: 12 });
+    await sleep(1400);
+    check('sheet: a location update does not re-expand a collapsed panel',
+      (await evaluate(`document.getElementById('sheet').classList.contains('peek')`)) === true);
+    await sess.send('Emulation.setGeolocationOverride',
+      { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 12 });
+    await sleep(600);
+
+    // The grip is the way back to the detail, and it has to actually reveal it.
+    await evaluate(`document.getElementById('sheet-toggle').click()`);
+    await sleep(300);
+    const expanded = await evaluate(`(() => {
+      const maps=document.querySelector('#sheet-body a.btn.primary');
+      return { peek: document.getElementById('sheet').classList.contains('peek'),
+               mapsShown: !!(maps && maps.offsetParent !== null),
+               aria: document.getElementById('sheet-toggle').getAttribute('aria-expanded'),
+               href: maps?maps.getAttribute('href'):null }; })()`);
+    check('sheet: tapping the grip expands it', expanded.peek === false && expanded.aria === 'true');
     check('flow: Google Maps walking hand-off',
-      !!dir.maps && /travelmode=walking/.test(dir.maps) && /origin=41\.59/.test(dir.maps));
+      expanded.mapsShown && /travelmode=walking/.test(expanded.href || '') &&
+      /origin=41\.59/.test(expanded.href || ''));
+
+    // Back to collapsed, which is the state the caution check below wants to prove itself in.
+    await evaluate(`document.getElementById('sheet-toggle').click()`);
+    await sleep(300);
+
+    /*
+     * Drag the grip, not just tap it. Chromium turns these mouse events into pointer events, which
+     * is what the handler listens for — worth testing because the drag is the fiddliest part: it
+     * captures the pointer, has to suppress the click that follows, and must snap rather than leave
+     * the sheet at an arbitrary height.
+     */
+    const gripBox = await evaluate(`(() => {
+      const r = document.getElementById('sheet-toggle').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    await sess.send('Input.dispatchMouseEvent',
+      { type: 'mousePressed', x: gripBox.x, y: gripBox.y, button: 'left', clickCount: 1 });
+    for (const dy of [20, 45, 75, 95]) {
+      await sess.send('Input.dispatchMouseEvent',
+        { type: 'mouseMoved', x: gripBox.x, y: gripBox.y - dy, button: 'left' });
+      await sleep(30);
+    }
+    await sess.send('Input.dispatchMouseEvent',
+      { type: 'mouseReleased', x: gripBox.x, y: gripBox.y - 95, button: 'left', clickCount: 1 });
+    await sleep(350);
+    const dragged = await evaluate(`(() => {
+      const s = document.getElementById('sheet');
+      return { peek: s.classList.contains('peek'),
+               // A snap means no leftover inline offset holding it mid-flight.
+               offset: s.style.transform || '' }; })()`);
+    check('sheet: dragging the grip up expands it and snaps',
+      dragged.peek === false && dragged.offset === '',
+      `peek=${dragged.peek} transform="${dragged.offset}"`);
+
+    await evaluate(`document.getElementById('sheet-toggle').click()`);
+    await sleep(300);
 
     /*
      * Flow 5 — the app doesn't claim more precision than it has.
@@ -454,12 +537,20 @@ async function run() {
       { latitude: FAIR_LAT, longitude: FAIR_LON, accuracy: 60 });
     await sleep(1500);
     const rough = await evaluate(`(() => {
-      const notes = [...document.querySelectorAll('#sheet-body .dir .note')].map(n => n.textContent.trim());
+      // offsetParent, not just presence: a caution the collapse hides is worse than no caution,
+      // because the panel then looks confident at exactly the moment it shouldn't.
+      const all = [...document.querySelectorAll('#sheet-body .dir .note')];
       const big = document.querySelector('#sheet-body .dir-live .big');
-      return { notes, big: big ? big.textContent.trim() : null }; })()`);
+      return { notes: all.map(n => n.textContent.trim()),
+               visible: all.filter(n => n.offsetParent !== null).map(n => n.textContent.trim()),
+               peek: document.getElementById('sheet').classList.contains('peek'),
+               big: big ? big.textContent.trim() : null }; })()`);
     check('honesty: the walking screen admits a rough fix',
       rough.notes.some(t => /accurate to about/.test(t)),
       rough.notes.join(' | ') || `(no notes; big="${rough.big}")`);
+    check('honesty: that caution is visible even with the panel collapsed',
+      rough.peek === true && rough.visible.some(t => /accurate to about/.test(t)),
+      `peek=${rough.peek}, visible: ${rough.visible.join(' | ') || 'none'}`);
     await shot('03-rough-fix');
 
     // Standing on top of an offset-derived pin: a bearing across 40 ft is noise, so the app should

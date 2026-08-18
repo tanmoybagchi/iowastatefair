@@ -60,9 +60,13 @@
     <div class="status" id="status" hidden role="status"></div>
 
     <section class="sheet" id="sheet" aria-live="polite">
-      <div class="sheet-grip">
+      <div class="sheet-grip" id="sheet-grip">
         <span class="sheet-title" id="sheet-title">Results</span>
-        <span class="bar" aria-hidden="true"></span>
+        <!-- The bar used to be decorative. It is now the real expand/collapse control for the
+             walking panel, so it has to be a button: draggable for thumbs, tappable for everyone,
+             and reachable from a keyboard. -->
+        <button class="bar" id="sheet-toggle" type="button" hidden
+                aria-expanded="false" aria-label="Show walking details"></button>
         <button class="sheet-close" id="sheet-close" type="button" aria-label="Close">✕</button>
       </div>
       <div class="sheet-body" id="sheet-body"></div>

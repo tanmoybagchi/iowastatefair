@@ -354,7 +354,9 @@
      * Centre on a point, optionally zooming to a given span in feet.
      *
      * Biased upward because the results/directions sheet covers the lower part of the screen —
-     * true centring put the thing you just selected underneath the sheet.
+     * true centring put the thing you just selected underneath the sheet. `biasY` is a fraction of
+     * the viewport: callers that know how much the sheet is actually covering should pass it, since
+     * the panel is collapsible and the old fixed 0.18 was tuned for one particular height.
      */
     focus(pt, spanFt, biasY) {
       if (!pt || pt.lat == null || !view) return this;
@@ -371,7 +373,7 @@
     },
 
     /** Frame two points together — used to show you and your destination at once. */
-    frame(a, b, padFt) {
+    frame(a, b, padFt, biasY) {
       if (!a || !b || a.lat == null || b.lat == null) return this;
       const pad = padFt || 220;
       const x1 = Math.min(px(a.lon), px(b.lon)) - pad, x2 = Math.max(px(a.lon), px(b.lon)) + pad;
@@ -379,8 +381,10 @@
       const aspect = view.h / view.w;
       let w = Math.max(x2 - x1, MIN_SPAN_FT), h = w * aspect;
       if (h < y2 - y1) { h = y2 - y1; w = h / aspect; }
-      // Same upward bias as focus(): keep both points clear of the sheet.
-      view = { x: (x1 + x2) / 2 - w / 2, y: (y1 + y2) / 2 - h / 2 + h * 0.18, w, h };
+      // Same upward bias as focus(), same reasoning: keep both points clear of the sheet, by however
+      // much of the screen the sheet is currently taking.
+      const bias = biasY == null ? 0.18 : biasY;
+      view = { x: (x1 + x2) / 2 - w / 2, y: (y1 + y2) / 2 - h / 2 + h * bias, w, h };
       clampView();
       applyView();
       return this;

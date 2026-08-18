@@ -210,15 +210,18 @@ node tools/smoke.js http://localhost:8099/
 node tools/smoke.js http://localhost:8099/ --update-cycle   # + the update path (see below)
 ```
 
-34 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
-map draws, geolocation is accepted, the four core flows work ("curly fries", the typo case,
-nearest-water, directions), **closing the result list stays closed across a location update**,
-**a distance inside its own uncertainty is never quoted as a figure and the walking screen admits a
-rough fix**, the other two pages render, the service worker activates, **the app boots, searches
-and reports its version with the network switched off**, being away from the fairgrounds suppresses
-distances instead of printing nonsense, and the console is clean.
+44 checks: the service-worker stamp and the generated icons match what's on disk, pages boot, the
+map draws, geolocation is accepted, the core flows work ("curly fries", the typo case,
+nearest-water, restrooms, "bathroom" reaching them through the synonym list, directions),
+**lists lead with a walk time and show the distance beneath it**, **closing the result list stays
+closed across a location update**, **the walking panel opens collapsed, keeps its live arrow and its
+cautions visible while collapsed, expands by tap or drag, and a location update does not re-expand
+it**, **a distance inside its own uncertainty is never quoted as a figure and the walking screen
+admits a rough fix**, the other two pages render, the service worker activates, **the app boots,
+searches and reports its version with the network switched off**, being away from the fairgrounds
+suppresses distances instead of printing nonsense, and the console is clean.
 
-`--update-cycle` adds a 35th check, and it is the only one that exercises an *already installed*
+`--update-cycle` adds a 45th check, and it is the only one that exercises an *already installed*
 worker being replaced by a new build — everything else does a first install, where `shell.js`
 deliberately does not reload. It appends a comment to `css/app.css`, re-stamps, forces an update
 check, and asserts the page comes back reporting the new cache name. It restores the original

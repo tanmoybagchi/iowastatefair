@@ -22,6 +22,7 @@
   const $ = id => document.getElementById(id);
   const mapEl = $('map'), qEl = $('q'), clearEl = $('clear');
   const sheet = $('sheet'), sheetBody = $('sheet-body'), sheetTitle = $('sheet-title');
+  const gripEl = $('sheet-grip'), toggleBtn = $('sheet-toggle');
   const statusEl = $('status');
 
   const standById = new Map(F.stands.map(s => [s.id, s]));
@@ -67,6 +68,15 @@
     results: [],
     partial: false,
     selected: null,      // {kind, label, sub, lat, lon, approx, stand?, item?}
+    /*
+     * How much of the sheet is showing: hidden | peek | open.
+     *
+     * This is state rather than something a renderer decides, and that distinction is the whole
+     * reason the panel stays where you put it. Both renderList() and renderDirections() run on
+     * every geolocation tick, so a renderer that sets the sheet's height would fight the user for
+     * it — see the note on renderList() and the close-button regression it came from.
+     */
+    sheet: 'hidden',
   };
 
   /** Every searchable thing reduced to one shape the list and map both understand. */
@@ -414,10 +424,19 @@
     state.selected = place;
     window.FairMap.setTarget(place.lat != null ? place : null);
 
+    /*
+     * Land in the peek, not the full panel. You tapped a result to go somewhere, and the thing you
+     * need for that is the map with an arrow on it — the menu, the caveats and the Google Maps
+     * hand-off are all still one tap away on the grip. Set before framing, because the frame's
+     * upward bias is measured from how much of the map the sheet is actually covering.
+     */
+    setSheet('peek');
+
     const g = Geo.snapshot();
     if (place.lat != null) {
-      if (g.usable) window.FairMap.frame(g, place);
-      else window.FairMap.focus(place, 900);
+      const bias = sheetCover() / 2;
+      if (g.usable) window.FairMap.frame(g, place, null, bias);
+      else window.FairMap.focus(place, 900, bias);
     }
     // You're about to walk somewhere while watching the distance — don't let the screen sleep.
     // Released again by closeSheet() and by "Back to list".
@@ -432,7 +451,16 @@
     const d = Geo.distanceTo(p);
     const brg = Geo.bearingTo(p);
 
-    sheetTitle.textContent = 'Walking there';
+    /*
+     * The destination goes in the grip, not in the body.
+     *
+     * That row is spent either way, and it was reading "Walking there" above a name above a location
+     * — three lines of nearly the same thing, in a panel whose whole job is to be short. The name is
+     * the only one of the three you can't infer, so it gets the row that's already there. `p.sub`
+     * moves to the expanded half: while you're walking the arrow is the answer, and on arrival the
+     * live block already spells out the stand name and the fair's own words for where it is.
+     */
+    sheetTitle.textContent = p.label;
 
     const unc = Geo.uncertaintyFt(p);
     const arrived = d != null && unc != null && d <= unc;
@@ -476,52 +504,78 @@
      * screen someone holds while walking, so it's the screen that has to admit when the number in
      * it can't be trusted: a fix from before you set off, or one too vague to act on.
      */
+    /*
+     * Two wordings each, because this panel is usually collapsed to a couple of lines and the long
+     * form is most of its height. The short one still names the actual problem and the actual
+     * number — it drops the advice, not the disclosure — and the full sentence is in the expanded
+     * half. What must never happen is a collapsed panel that looks confident.
+     */
     const cautions = [];
     if (d != null && g.stale) {
-      cautions.push(['warn', `This is measured from a fix ${ageWords(g.ageMs)} old — if you’ve just ` +
+      cautions.push(['warn',
+        `Fix is ${ageWords(g.ageMs)} old`,
+        `This is measured from a fix ${ageWords(g.ageMs)} old — if you’ve just ` +
         `reopened the app, give it a moment to catch up before you trust it.`]);
     }
     if (d != null && g.poor) {
-      cautions.push(['', `Your location is only accurate to about ${Geo.formatDistance(g.accuracyFt)}, ` +
+      cautions.push(['',
+        `Location accurate to about ${Geo.formatDistance(g.accuracyFt)}`,
+        `Your location is only accurate to about ${Geo.formatDistance(g.accuracyFt)}, ` +
         `so this distance is rough.`]);
     }
 
     const maps = p.lat != null ? Geo.mapsUrl(p) : null;
     const menu = p.stand && p.stand.id != null ? menuFor(p.stand) : '';
 
+    /*
+     * Two blocks, and which half a thing lands in is a judgement about whether you need it while
+     * walking or only when you stop to look.
+     *
+     * `.dir-head` survives the collapse. The cautions are in it deliberately: a warning that the fix
+     * is stale, or too vague to act on, is worth nothing if it's hidden behind a tap — the panel
+     * would then look confident precisely when it isn't. `.dir-more` holds what you'd stop to read.
+     */
     sheetBody.innerHTML = `<div class="dir">
-      <div class="where">${escapeHtml(p.label)}</div>
-      <div class="at">${escapeHtml(p.sub || '')}</div>
-      ${badgesFor(p)}
-      ${cautions.map(([cls, text]) => `<p class="note ${cls}">${escapeHtml(text)}</p>`).join('')}
-      ${live}
-      <div class="btnrow">
-        ${maps ? `<a class="btn primary" href="${maps}" target="_blank" rel="noopener">Open in Google Maps</a>` : ''}
-        ${g.heading == null && p.lat != null && !arrived ? '<button class="btn" id="compass" type="button">Use compass</button>' : ''}
-        <button class="btn ghost" id="back" type="button">Back to list</button>
+      <div class="dir-head">
+        ${cautions.map(([cls, short]) => `<p class="note tight ${cls}">${escapeHtml(short)}</p>`).join('')}
+        ${live}
       </div>
-      ${p.lat != null ? `<p class="hint">
-        The green line is a straight line to the target, not a walking route — buildings and
-        fences are in the way. ${p.approx ? 'This pin is approximate: it points at the right building or corner, not an exact stand.' : ''}
-      </p>` : ''}
-      ${menu}
+      <div class="dir-more">
+        <div class="at">${escapeHtml(p.sub || '')}</div>
+        ${cautions.map(([cls, , long]) => `<p class="note ${cls}">${escapeHtml(long)}</p>`).join('')}
+        ${badgesFor(p)}
+        <div class="btnrow">
+          ${maps ? `<a class="btn primary" href="${maps}" target="_blank" rel="noopener">Open in Google Maps</a>` : ''}
+          ${g.heading == null && p.lat != null && !arrived ? '<button class="btn" id="compass" type="button">Use compass</button>' : ''}
+          <button class="btn ghost" id="back" type="button">Back to list</button>
+        </div>
+        ${p.lat != null ? `<p class="hint">
+          The green line is a straight line to the target, not a walking route — buildings and
+          fences are in the way. ${p.approx ? 'This pin is approximate: it points at the right building or corner, not an exact stand.' : ''}
+        </p>` : ''}
+        ${menu}
+      </div>
     </div>`;
 
     const back = document.getElementById('back');
-    if (back) back.addEventListener('click', () => {
-      state.selected = null;
-      window.FairMap.setTarget(null);
-      if (window.Wake) window.Wake.release();   // browsing a list again, not walking a route
-      renderList();
-      openSheet();
-    });
+    if (back) back.addEventListener('click', backToList);
     const comp = document.getElementById('compass');
     if (comp) comp.addEventListener('click', async () => {
       const ok = await Geo.requestHeading();
       if (!ok) comp.textContent = 'Compass unavailable';
       else renderDirections();
     });
-    openSheet();
+
+    /*
+     * Applies the height the user chose — it does NOT force one open.
+     *
+     * This used to end in openSheet(), which was harmless while the panel had only two states. With
+     * a collapsible one it would be the close-button bug all over again: this runs on every
+     * geolocation fix, so collapsing the panel would last until the next tick and read as the grip
+     * being broken. Callers that mean "show me this" set state.sheet themselves.
+     */
+    if (state.sheet === 'hidden') state.sheet = 'peek';
+    applySheet();
   }
 
   function menuFor(stand) {
@@ -586,13 +640,67 @@
     openSheet();
   }
 
-  const openSheet = () => sheet.classList.add('open');
+  /*
+   * The only place the sheet's classes are set. Everything else moves `state.sheet` and calls this,
+   * so there is exactly one answer to "how open is the panel" and no renderer can quietly override
+   * the user.
+   */
+  function applySheet() {
+    sheet.classList.toggle('open', state.sheet !== 'hidden');
+    sheet.classList.toggle('peek', state.sheet === 'peek');
+    sheet.style.transform = '';                      // clear any in-progress drag offset
+    // The expand control belongs to the walking panel: there is nothing to expand on a list.
+    toggleBtn.hidden = !state.selected || state.sheet === 'hidden';
+    toggleBtn.setAttribute('aria-expanded', String(state.sheet === 'open'));
+    toggleBtn.setAttribute('aria-label',
+      state.sheet === 'open' ? 'Collapse walking details' : 'Show walking details');
+  }
+
+  const setSheet = (s) => { state.sheet = s; applySheet(); };
+  const openSheet = () => setSheet('open');
   const closeSheet = () => {
-    sheet.classList.remove('open');
+    setSheet('hidden');
     state.selected = null;
     window.FairMap.setTarget(null);
     if (window.Wake) window.Wake.release();
   };
+
+  /** Back to the results without dismissing them — what the ✕ means while walking somewhere. */
+  function backToList() {
+    state.selected = null;
+    window.FairMap.setTarget(null);
+    if (window.Wake) window.Wake.release();          // browsing a list again, not walking a route
+    renderList();
+    openSheet();
+  }
+
+  /*
+   * Expand/collapse, and re-frame as we go: the visible slice of map changes with the sheet, so the
+   * upward bias that keeps the target clear of the panel has to change with it too.
+   */
+  function toggleSheet() {
+    if (state.sheet === 'hidden') return;
+    setSheet(state.sheet === 'peek' ? 'open' : 'peek');
+    reframe();
+  }
+
+  /** Fraction of the map the sheet is currently covering, for FairMap's centring bias. */
+  function sheetCover() {
+    if (state.sheet === 'hidden' || !mapEl.clientHeight) return 0;
+    const r = sheet.getBoundingClientRect();
+    const m = mapEl.getBoundingClientRect();
+    const overlap = Math.max(0, Math.min(r.bottom, m.bottom) - Math.max(r.top, m.top));
+    return Math.min(0.8, overlap / m.height);
+  }
+
+  function reframe() {
+    const p = state.selected;
+    if (!p || p.lat == null) return;
+    const g = Geo.snapshot();
+    const bias = sheetCover() / 2;
+    if (g.usable) window.FairMap.frame(g, p, null, bias);
+    else window.FairMap.focus(p, null, bias);
+  }
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -632,7 +740,56 @@
   qEl.addEventListener('input', debounce(runSearch, 130));
   qEl.addEventListener('search', runSearch);
   clearEl.addEventListener('click', () => { qEl.value = ''; runSearch(); qEl.focus(); });
-  $('sheet-close').addEventListener('click', closeSheet);
+  // While walking, ✕ means "I'm done with this one", not "hide everything" — the list you picked it
+  // from is the useful place to land, and dismissing outright made you search again.
+  $('sheet-close').addEventListener('click', () => {
+    if (state.selected && state.mode !== 'idle') backToList();
+    else closeSheet();
+  });
+
+  /*
+   * The grip: tap anywhere on it to expand or collapse, or drag it.
+   *
+   * Tap is the primary mechanism and works on its own — drag is a convenience for thumbs. The drag
+   * only ever moves the sheet DOWN from open or UP from peek, and snaps to whichever state it ended
+   * up nearer; there is no free-height mode, because a half-open panel has no honest content rule.
+   */
+  let dragFrom = null, dragMoved = false;
+
+  gripEl.addEventListener('click', (e) => {
+    if (e.target.closest('#sheet-close')) return;    // its own handler above
+    if (dragMoved) { dragMoved = false; return; }    // a drag already decided this
+    toggleSheet();
+  });
+
+  gripEl.addEventListener('pointerdown', (e) => {
+    if (!state.selected || state.sheet === 'hidden' || e.target.closest('#sheet-close')) return;
+    dragFrom = { y: e.clientY, was: state.sheet };
+    dragMoved = false;
+    gripEl.setPointerCapture(e.pointerId);
+  });
+  gripEl.addEventListener('pointermove', (e) => {
+    if (!dragFrom) return;
+    const dy = e.clientY - dragFrom.y;
+    // Only in the direction that has somewhere to go, so the sheet can't be dragged off its anchor.
+    const travel = dragFrom.was === 'peek' ? Math.min(0, dy) : Math.max(0, dy);
+    if (Math.abs(travel) > 4) dragMoved = true;
+    sheet.style.transform = `translateY(${travel}px)`;
+  });
+  const endDrag = (e) => {
+    if (!dragFrom) return;
+    const dy = e.clientY - dragFrom.y;
+    const from = dragFrom.was;
+    dragFrom = null;
+    if (gripEl.hasPointerCapture && gripEl.hasPointerCapture(e.pointerId)) gripEl.releasePointerCapture(e.pointerId);
+    // 40px of intent, so a shaky thumb on a tap doesn't change state twice.
+    if (from === 'peek' && dy < -40) setSheet('open');
+    else if (from === 'open' && dy > 40) setSheet('peek');
+    else setSheet(from);
+    reframe();
+  };
+  gripEl.addEventListener('pointerup', endDrag);
+  gripEl.addEventListener('pointercancel', endDrag);
 
   document.querySelectorAll('.chip[data-chip]').forEach(c =>
     c.addEventListener('click', () => runChip(c.dataset.chip)));
